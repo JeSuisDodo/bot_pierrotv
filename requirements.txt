@@ -1,0 +1,6 @@
+discord.py
+flask
+python-dotenv
+aiohttp
+pymongo
+dnspython
