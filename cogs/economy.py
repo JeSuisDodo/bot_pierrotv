@@ -1,4 +1,5 @@
 import time
+import asyncio
 import discord
 from discord.ext import commands, tasks
 
@@ -32,8 +33,8 @@ class Economy(commands.Cog):
             return
 
         self.last_message_reward[message.author.id] = now
-        db.add_money(message.author, MESSAGE_REWARD)
-        db.add_message_count(message.author, 1)
+        await asyncio.to_thread(db.add_money, message.author, MESSAGE_REWARD)
+        await asyncio.to_thread(db.add_message_count, message.author, 1)
 
     # ---------- GAINS VOCAL ----------
     @tasks.loop(minutes=1)
@@ -47,8 +48,8 @@ class Economy(commands.Cog):
                     if member.bot:
                         continue
 
-                    db.add_money(member, VOICE_REWARD_PER_MINUTE)
-                    db.add_voicetime(member, 60)
+                    await asyncio.to_thread(db.add_money, member, VOICE_REWARD_PER_MINUTE)
+                    await asyncio.to_thread(db.add_voicetime, member, 60)
 
     @check_voice.before_loop
     async def before_check_voice(self):

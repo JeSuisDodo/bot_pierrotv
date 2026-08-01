@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -24,7 +25,7 @@ class BuySelect(discord.ui.Select):
         car = CARS[car_key]
         member = interaction.user
 
-        money = db.get_money(member)
+        money = await asyncio.to_thread(db.get_money, member)
         if money < car["price"]:
             await interaction.response.send_message(
                 f"Tu n'as pas assez d'argent pour **{car['name']}** "
@@ -33,8 +34,8 @@ class BuySelect(discord.ui.Select):
             )
             return
 
-        db.add_money(member, -car["price"])
-        db.add_car(member, car_key)
+        await asyncio.to_thread(db.add_money, member, -car["price"])
+        await asyncio.to_thread(db.add_car, member, car_key)
 
         await interaction.response.send_message(
             f"Achat réussi : **{car['name']}** pour {format(car['price'])} $ 🚗",
@@ -57,7 +58,7 @@ class Shop(commands.Cog):
 
     @app_commands.command(name="poche", description="Affiche ton argent disponible")
     async def poche(self, interaction: discord.Interaction):
-        money = db.get_money(interaction.user)
+        money = await asyncio.to_thread(db.get_money, interaction.user)
         embed = discord.Embed(
             title="💰 Ta poche",
             description=f"Tu as **{format(money)} $**",
@@ -69,7 +70,7 @@ class Shop(commands.Cog):
     @app_commands.describe(membre="Membre à consulter (toi-même par défaut)")
     async def garage(self, interaction: discord.Interaction, membre: discord.Member = None):
         target = membre or interaction.user
-        cars = db.get_cars(target)
+        cars = await asyncio.to_thread(db.get_cars, target)
         if not cars:
             description = "Ce garage est vide." if membre else "Ton garage est vide. Utilise `/shop` pour acheter une voiture !"
         else:
@@ -91,7 +92,7 @@ class Shop(commands.Cog):
 
     @app_commands.command(name="infos", description="Affiche toutes tes statistiques")
     async def infos(self, interaction: discord.Interaction):
-        member_doc = db.get_member(interaction.user)
+        member_doc = await asyncio.to_thread(db.get_member, interaction.user)
         cars_count = len(member_doc["cars"])
 
         embed = discord.Embed(

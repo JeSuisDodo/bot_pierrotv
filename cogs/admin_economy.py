@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -7,7 +8,7 @@ from cars import CARS
 from format import format
 
 # ID du rôle modérateur autorisé à utiliser ces commandes
-MOD_ROLE_ID = 270200933839929345
+MOD_ROLE_ID = None  # remplace par l'ID du rôle, ex: 123456789012345678
 
 
 def is_mod():
@@ -35,7 +36,7 @@ class AdminEconomy(commands.Cog):
             await interaction.response.send_message("Le montant doit être positif.", ephemeral=True)
             return
 
-        db.add_money(membre, montant)
+        await asyncio.to_thread(db.add_money, membre, montant)
         embed = discord.Embed(
             title="Argent donné",
             description=f"**{format(montant)} $** ajoutés à {membre.mention}",
@@ -51,7 +52,7 @@ class AdminEconomy(commands.Cog):
             await interaction.response.send_message("Le montant doit être positif.", ephemeral=True)
             return
 
-        db.add_money(membre, -montant)
+        await asyncio.to_thread(db.add_money, membre, -montant)
         embed = discord.Embed(
             title="Argent repris",
             description=f"**{format(montant)} $** retirés à {membre.mention}",
@@ -63,7 +64,7 @@ class AdminEconomy(commands.Cog):
     @app_commands.describe(membre="Membre concerné", voiture="Voiture à supprimer")
     @is_mod()
     async def delete(self, interaction: discord.Interaction, membre: discord.Member, voiture: str):
-        removed = db.remove_car(membre, voiture)
+        removed = await asyncio.to_thread(db.remove_car, membre, voiture)
         if not removed:
             await interaction.response.send_message(
                 f"{membre.mention} ne possède pas cette voiture.", ephemeral=True
@@ -84,7 +85,7 @@ class AdminEconomy(commands.Cog):
         membre = interaction.namespace.membre
         if membre is None:
             return []
-        cars = db.get_cars(membre)
+        cars = await asyncio.to_thread(db.get_cars, membre)
         unique_keys = sorted(set(cars))
         choices = []
         for key in unique_keys:

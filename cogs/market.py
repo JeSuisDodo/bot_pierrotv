@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -13,7 +14,7 @@ class Market(commands.Cog):
 
     @app_commands.command(name="hdv", description="Affiche les annonces de l'hôtel des ventes")
     async def hdv(self, interaction: discord.Interaction):
-        listings = db.get_listings()
+        listings = await asyncio.to_thread(db.get_listings)
         if not listings:
             description = "Aucune annonce en ce moment."
         else:
@@ -48,7 +49,7 @@ class Market(commands.Cog):
             await interaction.response.send_message("Le prix doit être positif.", ephemeral=True)
             return
 
-        removed = db.remove_car(interaction.user, voiture)
+        removed = await asyncio.to_thread(db.remove_car, interaction.user, voiture)
         if not removed:
             await interaction.response.send_message(
                 "Tu ne possèdes pas cette voiture. Vérifie ton `/garage`.",
@@ -57,7 +58,7 @@ class Market(commands.Cog):
             return
 
         car = CARS[voiture]
-        short_id = db.create_listing(interaction.user, voiture, prix)
+        short_id = await asyncio.to_thread(db.create_listing, interaction.user, voiture, prix)
 
         embed = discord.Embed(
             title="Annonce créée",
@@ -68,7 +69,7 @@ class Market(commands.Cog):
 
     @vendre.autocomplete("voiture")
     async def vendre_autocomplete(self, interaction: discord.Interaction, current: str):
-        cars = db.get_cars(interaction.user)
+        cars = await asyncio.to_thread(db.get_cars, interaction.user)
         unique_keys = sorted(set(cars))
         choices = []
         for key in unique_keys:
@@ -80,7 +81,7 @@ class Market(commands.Cog):
     @app_commands.command(name="acheter", description="Achète une voiture sur l'hôtel des ventes")
     @app_commands.describe(id_annonce="Annonce à acheter (tape pour voir les annonces)")
     async def acheter(self, interaction: discord.Interaction, id_annonce: str):
-        listing = db.get_listing_by_short_id(id_annonce)
+        listing = await asyncio.to_thread(db.get_listing_by_short_id, id_annonce)
         if listing is None:
             await interaction.response.send_message("Annonce introuvable.", ephemeral=True)
             return
@@ -89,7 +90,7 @@ class Market(commands.Cog):
             await interaction.response.send_message("Tu ne peux pas acheter ta propre annonce.", ephemeral=True)
             return
 
-        buyer_money = db.get_money(interaction.user)
+        buyer_money = await asyncio.to_thread(db.get_money, interaction.user)
         if buyer_money < listing["price"]:
             await interaction.response.send_message(
                 f"Tu n'as pas assez d'argent ({format(listing['price'])} $ requis, "
@@ -102,13 +103,13 @@ class Market(commands.Cog):
         car = CARS[car_key]
 
         # Transaction
-        db.add_money(interaction.user, -listing["price"])
-        db.add_car(interaction.user, car_key)
-        db.remove_listing(listing["_id"])
+        await asyncio.to_thread(db.add_money, interaction.user, -listing["price"])
+        await asyncio.to_thread(db.add_car, interaction.user, car_key)
+        await asyncio.to_thread(db.remove_listing, listing["_id"])
 
         seller = interaction.guild.get_member(listing["seller_id"])
         if seller:
-            db.add_money(seller, listing["price"])
+            await asyncio.to_thread(db.add_money, seller, listing["price"])
 
         embed = discord.Embed(
             title="Achat réussi",
@@ -120,7 +121,7 @@ class Market(commands.Cog):
 
     @acheter.autocomplete("id_annonce")
     async def acheter_autocomplete(self, interaction: discord.Interaction, current: str):
-        listings = db.get_listings()
+        listings = await asyncio.to_thread(db.get_listings)
         choices = []
         for listing in listings:
             if listing["seller_id"] == interaction.user.id:
