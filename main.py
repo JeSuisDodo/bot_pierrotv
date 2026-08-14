@@ -34,9 +34,9 @@ EXTENSIONS = [
     "cogs.shop",
     "cogs.market",
     "cogs.admin_economy",
+    "cogs.valorant",
 ]
-
-GUILD_ID = discord.Object(id=834429780916830280)
+ 
  
 @bot.event
 async def on_ready():
@@ -45,11 +45,9 @@ async def on_ready():
             await bot.load_extension(ext)
         except Exception as e:
             print(f"Erreur lors du chargement de {ext} : {e}")
-
-    bot.tree.copy_global_to(guild=GUILD_ID)
-    synced = await bot.tree.sync(guild=GUILD_ID)
+ 
+    synced = await bot.tree.sync()
     print(f"{len(synced)} commandes slash synchronisées.")
     print(f"Connecté en tant que {bot.user}")
- 
  
 bot.run(TOKEN)
