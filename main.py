@@ -35,6 +35,7 @@ EXTENSIONS = [
     "cogs.market",
     "cogs.admin_economy",
     "cogs.valorant",
+    "cogs.guide",
 ]
  
  
