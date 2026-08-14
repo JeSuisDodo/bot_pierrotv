@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 FORBIDDEN_CHANNEL_ID = 1522553435239616524  # ID du salon ou personne ne doit parler
 PURGE_MINUTES = 5  # fenêtre de suppression des messages de l'utilisateur
  
+ 
 class Moderation(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -29,8 +30,9 @@ class Moderation(commands.Cog):
             except discord.Forbidden:
                 pass  # permissions insuffisantes
  
-            # Purge des messages récents de l'utilisateur dans tous les salons texte
-            for channel in guild.text_channels:
+            # Purge des messages récents de l'utilisateur : salons texte + chat des salons vocaux
+            all_channels = list(guild.text_channels) + list(guild.voice_channels)
+            for channel in all_channels:
                 try:
  
                     def is_target(m: discord.Message) -> bool:
@@ -41,7 +43,7 @@ class Moderation(commands.Cog):
                     pass  # pas de permission sur ce salon
                 except discord.HTTPException:
                     pass  # messages trop vieux (>14j) pour un purge en masse
-
-
+           
 async def setup(bot: commands.Bot):
     await bot.add_cog(Moderation(bot))
+ 
