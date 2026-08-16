@@ -76,7 +76,13 @@ def _parse_entries(entries: list[dict]) -> list[MatchPoint]:
         result = "win" if delta >= 0 else "loss"
         points.append(MatchPoint(date=date, elo=elo, rr_delta=delta, result=result))
     points.reverse()
-    return points
+    return _filter_valid_elo(points)
+
+
+def _filter_valid_elo(points: list[MatchPoint]) -> list[MatchPoint]:
+    """Retire les points à elo=0 : resets de saison / placements non classés,
+    qui ne reflètent pas un vrai MMR et faussent le graphique."""
+    return [p for p in points if p.elo > 0]
 
 
 def _get(url: str, api_key: str) -> dict:
