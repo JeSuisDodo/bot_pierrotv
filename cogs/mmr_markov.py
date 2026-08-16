@@ -95,7 +95,10 @@ def fetch_mmr_history(cfg: Config, min_matches: int = 10, max_matches: Optional[
     entries = data.get("history", []) if isinstance(data, dict) else (data or [])
     points = _parse_entries(entries)
 
-    if len(points) >= min_matches:
+    # On ne s'arrête ici que si on a DÉJÀ assez de matchs pour satisfaire max_matches.
+    # Sinon (cas fréquent : mmr-history ne couvre que l'acte en cours, ~20 matchs),
+    # on va chercher le reste via l'historique paginé stored-mmr-history.
+    if len(points) >= min_matches and (max_matches is None or len(points) >= max_matches):
         return points[-max_matches:] if max_matches else points
 
     stored_points = fetch_stored_history_paginated(cfg, max_matches=max_matches)
