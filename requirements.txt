@@ -4,3 +4,7 @@ python-dotenv
 aiohttp
 pymongo
 dnspython
+certifi
+numpy
+matplotlib
+requests

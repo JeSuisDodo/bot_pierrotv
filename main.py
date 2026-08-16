@@ -34,8 +34,9 @@ EXTENSIONS = [
     "cogs.shop",
     "cogs.market",
     "cogs.admin_economy",
-    "cogs.valorant",
+    "cogs.valornt",
     "cogs.guide",
+    "cogs.mmr_markov"
 ]
  
  
