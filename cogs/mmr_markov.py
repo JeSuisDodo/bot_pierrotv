@@ -91,6 +91,30 @@ def format_rank_rr(elo: float, radiant_threshold_rr: int = DEFAULT_RADIANT_THRES
     return f"{rank} ({rr} RR)"
 
 
+# Couleur par groupe de rang (ignore le sous-palier, ex: "Fer 1"/"Fer 2" -> "Fer")
+RANK_COLORS: dict[str, str] = {
+    "Fer": "#8d8d93",
+    "Bronze": "#a9704f",
+    "Argent": "#a6b1bb",
+    "Or": "#e0b93d",
+    "Platine": "#2fb8b0",
+    "Diamant": "#c77dff",
+    "Ascendant": "#2ecc71",
+    "Immortel": "#8e2a56",
+    "Radiant": "#ffd700",
+}
+
+
+def rank_group(rank_name: str) -> str:
+    """'Fer 1' -> 'Fer', 'Immortel 3' -> 'Immortel', 'Radiant' -> 'Radiant'."""
+    return rank_name.split(" ")[0]
+
+
+def elo_to_color(elo: float, radiant_threshold_rr: int = DEFAULT_RADIANT_THRESHOLD_RR) -> str:
+    rank_name, _ = elo_to_rank_and_rr(elo, radiant_threshold_rr)
+    return RANK_COLORS.get(rank_group(rank_name), "#1d3557")
+
+
 def fetch_radiant_threshold_rr(region: str, platform: str = "pc") -> int:
     """Récupère le RR du 500e joueur du classement live (seuil réel d'entrée
     en Radiant pour cette région). Si le classement compte moins de 500
@@ -424,13 +448,43 @@ def plot_comparison(
     std_sim = sims.std(axis=0)
     n = len(real_elo)
 
-    fig, ax = plt.subplots(figsize=(11, 6.5))
-    ax.plot(real_elo, label="Rang réel (proxy MMR)", color="black", linewidth=2)
+    # --- Palette et typographie ---
+    COLOR_REAL = "#1d3557"       # bleu marine profond
+    COLOR_SIM = "#e63946"        # rouge corail vif
+    COLOR_FILL = "#e63946"
+    COLOR_GRID = "#d0d0d0"
+    COLOR_TEXT = "#2b2b2b"
+    COLOR_BG = "#fbfbfd"
+
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Verdana", "DejaVu Sans", "Arial"],
+        "font.size": 11,
+        "text.color": COLOR_TEXT,
+        "axes.edgecolor": "#999999",
+        "axes.labelcolor": COLOR_TEXT,
+        "xtick.color": COLOR_TEXT,
+        "ytick.color": COLOR_TEXT,
+    })
+
+    fig, ax = plt.subplots(figsize=(11, 6.5), facecolor=COLOR_BG)
+    ax.set_facecolor(COLOR_BG)
+
+    ax.plot([], [], color=COLOR_REAL, linewidth=2.6, label="Rang réel (couleur = rang)")  # entrée légende neutre
+    for i in range(n - 1):
+        seg_color = elo_to_color(real_elo[i], radiant_threshold_rr)
+        ax.plot(
+            [i, i + 1], [real_elo[i], real_elo[i + 1]],
+            color=seg_color, linewidth=2.6, solid_capstyle="round", zorder=3,
+        )
     x_sim = range(len(mean_sim))
-    ax.plot(x_sim, mean_sim, label="Chaîne de Markov ordre 2 (moyenne simulée)", color="tab:red")
+    ax.plot(
+        x_sim, mean_sim, label="Chaîne de Markov ordre 2 (moyenne simulée)",
+        color=COLOR_SIM, linewidth=1.6, solid_capstyle="round",
+    )
     ax.fill_between(
         x_sim, mean_sim - std_sim, mean_sim + std_sim,
-        color="tab:red", alpha=0.2, label="Écart-type simulé",
+        color=COLOR_FILL, alpha=0.15, label="Écart-type simulé", linewidth=0,
     )
 
     # --- Axe des ordonnées en rangs plutôt qu'en elo brut ---
@@ -440,28 +494,38 @@ def plot_comparison(
     ticks = [t for t, _ in RANK_TIERS if y_min - 100 <= t <= min(y_max + 100, IMMORTAL_START)]
     labels = [name_ for t, name_ in RANK_TIERS if y_min - 100 <= t <= min(y_max + 100, IMMORTAL_START)]
 
-    # À partir d'Immortel, on n'affiche que deux repères : le début
-    # d'Immortel 3 (200 RR cumulés) et le début de Radiant (seuil live
-    # actuel), sans graduation intermédiaire tous les 100 RR.
+    # À partir d'Immortel, on affiche un repère par palier significatif
+    # (Immortel 1/2/3 puis Radiant au seuil live actuel), sans graduation
+    # intermédiaire tous les 100 RR.
+    immortel1_elo = IMMORTAL_START
+    immortel2_elo = IMMORTAL_START + 100
     immortel3_elo = IMMORTAL_START + 200
     radiant_elo = IMMORTAL_START + radiant_threshold_rr
 
-    if y_min - 100 <= immortel3_elo <= y_max + 100:
-        ticks.append(immortel3_elo)
-        labels.append("Immortel 3")
-
-    if y_min - 100 <= radiant_elo <= y_max + 100:
-        ticks.append(radiant_elo)
-        labels.append("Radiant")
+    for elo_mark, label in [
+        (immortel1_elo, "Immortel 1"),
+        (immortel2_elo, "Immortel 2"),
+        (immortel3_elo, "Immortel 3"),
+        (radiant_elo, "Radiant"),
+    ]:
+        if y_min - 100 <= elo_mark <= y_max + 100:
+            ticks.append(elo_mark)
+            labels.append(label)
 
     ax.set_yticks(ticks)
     ax.set_yticklabels(labels)
-    ax.grid(axis="y", alpha=0.2)
+    ax.grid(axis="y", color=COLOR_GRID, linewidth=0.8, linestyle="-", alpha=0.6)
+    ax.set_axisbelow(True)
+
+    for spine in ("top", "right", "left"):
+        ax.spines[spine].set_visible(False)
+    ax.spines["bottom"].set_color("#999999")
+    ax.tick_params(axis="both", length=0)
 
     # --- Extremums (dont le max/min global garanti), annotés avec rang + RR ---
     extrema = find_local_extrema(real_elo)
     for idx, val, kind in extrema:
-        offset = (0, 12) if kind == "max" else (0, -16)
+        offset = (0, 13) if kind == "max" else (0, -17)
         va = "bottom" if kind == "max" else "top"
         ax.annotate(
             format_rank_rr(val, radiant_threshold_rr),
@@ -471,9 +535,11 @@ def plot_comparison(
             ha="center",
             va=va,
             fontsize=8,
-            color="black",
-            arrowprops=dict(arrowstyle="-", color="gray", lw=0.7),
+            color=COLOR_TEXT,
+            fontweight="medium",
+            arrowprops=dict(arrowstyle="-", color="#aaaaaa", lw=0.8),
         )
+        ax.scatter([idx], [val], s=18, color=COLOR_REAL, zorder=5, edgecolors=COLOR_BG, linewidths=0.8)
 
     # --- Rang + RR actuel affiché à droite de la courbe simulée (rouge) ---
     padding = max(int(n * 0.15), 10)
@@ -485,19 +551,22 @@ def plot_comparison(
         textcoords="offset points",
         va="center",
         ha="left",
-        fontsize=10,
+        fontsize=11,
         fontweight="bold",
-        color="tab:red",
+        color=COLOR_SIM,
     )
 
-    ax.set_xlabel("Numéro de match")
-    ax.set_ylabel("Rang")
-    ax.set_title(f"Progression MMR de {name}#{tag}")
-    ax.legend(loc="upper left")
+    ax.set_xlabel("Numéro de match", fontsize=10.5, labelpad=8)
+    ax.set_ylabel("Rang", fontsize=10.5, labelpad=8)
+    ax.set_title(f"Progression MMR de {name}#{tag}", fontsize=15, fontweight="bold", color=COLOR_TEXT, pad=16)
+    legend = ax.legend(loc="upper left", frameon=True, fontsize=9.5)
+    legend.get_frame().set_facecolor(COLOR_BG)
+    legend.get_frame().set_edgecolor("#dddddd")
+    legend.get_frame().set_linewidth(0.8)
     fig.tight_layout()
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=150)
+    fig.savefig(buf, format="png", dpi=150, facecolor=COLOR_BG)
     plt.close(fig)
     buf.seek(0)
     return buf
@@ -592,9 +661,7 @@ class MMRMarkov(commands.Cog):
             description=(
                 "Modèle statistique (chaîne de Markov d'ordre 2) : la courbe noire est le MMR réel "
                 "(proxy), la rouge la moyenne simulée, la zone rose l'écart-type. Riot ne publie pas "
-                "la vraie formule, ceci est une approximation.\n\n"
-                f"Seuil Radiant utilisé pour ce graphique : **{radiant_threshold_rr} RR** "
-                "(RR du 500e joueur du classement live de cette région, `/radiant` pour vérifier)."
+                "la vraie formule, ceci est une approximation."
             ),
             color=discord.Color.red(),
         )
