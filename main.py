@@ -49,9 +49,12 @@ async def on_ready():
         except Exception as e:
             print(f"Erreur lors du chargement de {ext} : {e}")
 
+    # Nettoyage : supprime les anciennes commandes globales (résidu du bug précédent)
+    bot.tree.clear_commands(guild=None)
+    await bot.tree.sync()
+
     bot.tree.copy_global_to(guild=GUILD_ID)
     synced = await bot.tree.sync(guild=GUILD_ID)
     print(f"{len(synced)} commandes slash synchronisées.")
     print(f"Connecté en tant que {bot.user}")
- 
 bot.run(TOKEN)
