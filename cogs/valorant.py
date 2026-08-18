@@ -125,7 +125,7 @@ class Valorant(commands.Cog):
         except (discord.HTTPException, ConnectionError, OSError):
             return
 
-        url = f"https://api.henrikdev.xyz/valorant/v3/leaderboard/{region.value}/pc?start_index=500&size=1"
+        url = f"https://api.henrikdev.xyz/valorant/v3/leaderboard/{region.value}/pc?start_index=1&size=500"
         headers = {"Authorization": HENRIKDEV_API_KEY} if HENRIKDEV_API_KEY else {}
 
         try:
@@ -140,20 +140,30 @@ class Valorant(commands.Cog):
             return
 
         players = payload.get("data", {}).get("players", [])
+        reported_rank = players[499].get("leaderboard_rank") if len(players) >= 500 else None
+        pagination_reliable = len(players) >= 500 and (reported_rank is None or abs(reported_rank - 500) <= 20)
 
-        if players:
-            threshold_rr = players[0].get("rr", 300)
-            player_name = players[0].get("name", "?")
-            player_tag = players[0].get("tag", "?")
+        if pagination_reliable:
+            player_500 = players[499]
+            threshold_rr = player_500.get("rr", 300)
+            player_name = player_500.get("name", "?")
+            player_tag = player_500.get("tag", "?")
             description = (
                 f"Le seuil actuel pour être Radiant en **{region.name}** est de **{threshold_rr} RR**.\n"
                 f"C'est le RR du 500e joueur du classement (`{player_name}#{player_tag}`)."
             )
-        else:
+        elif len(players) < 500:
             threshold_rr = 300
             description = (
                 f"Moins de 500 joueurs classés au-delà d'Immortel en **{region.name}**.\n"
                 f"Le seuil Radiant retombe donc sur le plancher théorique : **{threshold_rr} RR**."
+            )
+        else:
+            threshold_rr = 300
+            description = (
+                f"Impossible de confirmer la position exacte du 500e joueur en **{region.name}** "
+                f"(l'API n'a pas renvoyé le bon classement). Seuil plancher utilisé par défaut : "
+                f"**{threshold_rr} RR**."
             )
 
         embed = discord.Embed(

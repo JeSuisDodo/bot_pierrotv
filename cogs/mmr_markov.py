@@ -94,18 +94,30 @@ def format_rank_rr(elo: float, radiant_threshold_rr: int = DEFAULT_RADIANT_THRES
 def fetch_radiant_threshold_rr(region: str, platform: str = "pc") -> int:
     """Récupère le RR du 500e joueur du classement live (seuil réel d'entrée
     en Radiant pour cette région). Si le classement compte moins de 500
-    joueurs (région peu peuplée), on retombe sur le seuil plancher de 300 RR."""
+    joueurs (région peu peuplée), on retombe sur le seuil plancher de 300 RR.
+
+    On récupère les 500 premiers joueurs d'un coup (size=500) plutôt que de
+    se fier au paramètre de pagination start_index=500 seul : certains CDN/
+    caches renvoient la première page par défaut quand start_index est
+    utilisé isolément, ce qui donnerait le RR du joueur classé 1er au lieu
+    du 500e."""
     if not HENRIKDEV_API_KEY:
         return DEFAULT_RADIANT_THRESHOLD_RR
 
-    url = f"https://api.henrikdev.xyz/valorant/v3/leaderboard/{region}/{platform}?start_index=500&size=1"
+    url = f"https://api.henrikdev.xyz/valorant/v3/leaderboard/{region}/{platform}?start_index=1&size=500"
     try:
-        resp = requests.get(url, headers={"Authorization": HENRIKDEV_API_KEY}, timeout=15)
+        resp = requests.get(url, headers={"Authorization": HENRIKDEV_API_KEY}, timeout=20)
         resp.raise_for_status()
         payload = resp.json()
         players = payload.get("data", {}).get("players", [])
-        if players:
-            return int(players[0].get("rr", DEFAULT_RADIANT_THRESHOLD_RR))
+        if len(players) >= 500:
+            player_500 = players[499]
+            # Garde-fou : si le rang renvoyé n'est pas proche de 500, la
+            # pagination n'a probablement pas été respectée par l'API/CDN.
+            reported_rank = player_500.get("leaderboard_rank")
+            if reported_rank is not None and abs(reported_rank - 500) > 20:
+                return DEFAULT_RADIANT_THRESHOLD_RR
+            return int(player_500.get("rr", DEFAULT_RADIANT_THRESHOLD_RR))
     except Exception:
         pass
     return DEFAULT_RADIANT_THRESHOLD_RR
