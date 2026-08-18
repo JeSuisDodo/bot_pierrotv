@@ -32,7 +32,8 @@ import matplotlib.pyplot as plt
 
 HENRIKDEV_API_KEY = os.getenv("HENRIKDEV_API_KEY")
 
-# Correspondance elo -> rang (paliers de 100, standard Valorant compétitif)
+# Correspondance elo -> rang, valable UNIQUEMENT en dessous d'Immortel
+# (paliers fixes de 100, RR remis à 0 à chaque changement de rang)
 RANK_TIERS: list[tuple[int, str]] = [
     (0, "Fer 1"), (100, "Fer 2"), (200, "Fer 3"),
     (300, "Bronze 1"), (400, "Bronze 2"), (500, "Bronze 3"),
@@ -41,44 +42,73 @@ RANK_TIERS: list[tuple[int, str]] = [
     (1200, "Platine 1"), (1300, "Platine 2"), (1400, "Platine 3"),
     (1500, "Diamant 1"), (1600, "Diamant 2"), (1700, "Diamant 3"),
     (1800, "Ascendant 1"), (1900, "Ascendant 2"), (2000, "Ascendant 3"),
-    (2100, "Immortel 1"), (2200, "Immortel 2"), (2300, "Immortel 3"),
-    (2400, "Radiant"),
 ]
 
+# Elo où débute l'Immortel (fin du dernier palier Ascendant 3, qui fait
+# lui-même 100 de large comme les autres rangs classiques)
+IMMORTAL_START = 2100
 
-def elo_to_rank(elo: float) -> str:
-    """Convertit une valeur d'elo en nom de rang (dernier palier atteint)."""
-    rank = RANK_TIERS[0][1]
-    for threshold, name in RANK_TIERS:
-        if elo >= threshold:
-            rank = name
-        else:
-            break
-    return rank
+# Seuil RR par défaut pour Radiant si le classement live n'a pas pu être
+# récupéré (300 RR est le plancher théorique minimum avant même de
+# pouvoir prétendre à une place dans le top 500)
+DEFAULT_RADIANT_THRESHOLD_RR = 300
 
 
-RADIANT_THRESHOLD = RANK_TIERS[-1][0]  # 2400 : seuil d'entrée en Radiant
+def elo_to_rank_and_rr(elo: float, radiant_threshold_rr: int = DEFAULT_RADIANT_THRESHOLD_RR) -> tuple[str, int]:
+    """Convertit une valeur d'elo en (nom du rang, RR).
+
+    En dessous d'Immortel : chaque rang fait 100 RR de large, le RR est
+    remis à 0 à chaque changement de rang (fonctionnement classique).
+
+    À partir d'Immortel : le RR est CUMULATIF et ne se remet JAMAIS à 0.
+    On passe Immortel 2 à 100 RR cumulés, Immortel 3 à 200 RR cumulés.
+    Au-delà de 300 RR (ou du seuil réel du 500e joueur du classement live
+    si connu via radiant_threshold_rr), le joueur devient Radiant SEULEMENT
+    s'il est effectivement dans le top 500 de sa région — en dessous de ce
+    seuil de classement, il reste Immortel 3 même avec un RR très élevé.
+    Cette fonction ne connaît pas le classement historique exact à chaque
+    match ; radiant_threshold_rr est le seuil utilisé au moment du calcul,
+    donc une approximation pour les points anciens de l'historique."""
+    if elo < IMMORTAL_START:
+        idx = max(0, min(int(elo // 100), len(RANK_TIERS) - 1))
+        threshold, name = RANK_TIERS[idx]
+        rr = int(round(elo - threshold))
+        rr = max(0, min(rr, 99))
+        return name, rr
+
+    total_rr = max(0, int(round(elo - IMMORTAL_START)))
+    if total_rr >= radiant_threshold_rr:
+        return "Radiant", total_rr
+    if total_rr >= 200:
+        return "Immortel 3", total_rr
+    if total_rr >= 100:
+        return "Immortel 2", total_rr
+    return "Immortel 1", total_rr
 
 
-def elo_to_rank_and_rr(elo: float) -> tuple[str, int]:
-    """Convertit une valeur d'elo en (nom du rang, RR dans ce rang).
-    En dessous de Radiant, chaque rang fait 100 RR de large (0-100).
-    Radiant n'a pas de plafond : le RR continue de grimper sans jamais reset
-    (le seuil réel dépend du top 500 de la région et varie légèrement,
-    ceci reste une approximation basée sur l'echelle du modèle)."""
-    if elo >= RADIANT_THRESHOLD:
-        return "Radiant", int(round(elo - RADIANT_THRESHOLD))
-
-    idx = max(0, min(int(elo // 100), len(RANK_TIERS) - 2))
-    threshold, name = RANK_TIERS[idx]
-    rr = int(round(elo - threshold))
-    rr = max(0, min(rr, 99))
-    return name, rr
-
-
-def format_rank_rr(elo: float) -> str:
-    rank, rr = elo_to_rank_and_rr(elo)
+def format_rank_rr(elo: float, radiant_threshold_rr: int = DEFAULT_RADIANT_THRESHOLD_RR) -> str:
+    rank, rr = elo_to_rank_and_rr(elo, radiant_threshold_rr)
     return f"{rank} ({rr} RR)"
+
+
+def fetch_radiant_threshold_rr(region: str, platform: str = "pc") -> int:
+    """Récupère le RR du 500e joueur du classement live (seuil réel d'entrée
+    en Radiant pour cette région). Si le classement compte moins de 500
+    joueurs (région peu peuplée), on retombe sur le seuil plancher de 300 RR."""
+    if not HENRIKDEV_API_KEY:
+        return DEFAULT_RADIANT_THRESHOLD_RR
+
+    url = f"https://api.henrikdev.xyz/valorant/v3/leaderboard/{region}/{platform}?start_index=500&size=1"
+    try:
+        resp = requests.get(url, headers={"Authorization": HENRIKDEV_API_KEY}, timeout=15)
+        resp.raise_for_status()
+        payload = resp.json()
+        players = payload.get("data", {}).get("players", [])
+        if players:
+            return int(players[0].get("rr", DEFAULT_RADIANT_THRESHOLD_RR))
+    except Exception:
+        pass
+    return DEFAULT_RADIANT_THRESHOLD_RR
 
 
 def find_local_extrema(
@@ -370,7 +400,13 @@ def simulate_order2(
     return trajectories * chain.width
 
 
-def plot_comparison(history: list[MatchPoint], sims: np.ndarray, name: str, tag: str) -> io.BytesIO:
+def plot_comparison(
+    history: list[MatchPoint],
+    sims: np.ndarray,
+    name: str,
+    tag: str,
+    radiant_threshold_rr: int = DEFAULT_RADIANT_THRESHOLD_RR,
+) -> io.BytesIO:
     real_elo = np.array([m.elo for m in history], dtype=float)
     mean_sim = sims.mean(axis=0)
     std_sim = sims.std(axis=0)
@@ -387,19 +423,24 @@ def plot_comparison(history: list[MatchPoint], sims: np.ndarray, name: str, tag:
 
     # --- Axe des ordonnées en rangs plutôt qu'en elo brut ---
     y_min, y_max = ax.get_ylim()
-    ticks = [t for t, _ in RANK_TIERS if y_min - 100 <= t <= y_max + 100]
-    labels = [name_ for t, name_ in RANK_TIERS if y_min - 100 <= t <= y_max + 100]
 
-    # Au-dessus de Radiant, il n'y a plus de palier fixe (le seuil dépend du
-    # top 500 régional) : on ajoute des graduations tous les 100 RR pour ne
-    # pas perdre les repères visuels au-delà de ce point.
-    if y_max > RADIANT_THRESHOLD:
+    # Rangs classiques en dessous d'Immortel (paliers fixes de 100, RR reset)
+    ticks = [t for t, _ in RANK_TIERS if y_min - 100 <= t <= min(y_max + 100, IMMORTAL_START)]
+    labels = [name_ for t, name_ in RANK_TIERS if y_min - 100 <= t <= min(y_max + 100, IMMORTAL_START)]
+
+    # À partir d'Immortel, le RR est cumulatif (pas de reset) : on place une
+    # graduation tous les 100 RR, avec le nom du rang correspondant à ce
+    # RR cumulé (Immortel 1/2/3 puis Radiant une fois le seuil live dépassé).
+    if y_max >= IMMORTAL_START:
         step = 100
-        rr_tick = RADIANT_THRESHOLD + step
-        while rr_tick <= y_max + step:
-            ticks.append(rr_tick)
-            labels.append(f"Radiant +{rr_tick - RADIANT_THRESHOLD} RR")
-            rr_tick += step
+        elo_tick = IMMORTAL_START
+        while elo_tick <= y_max + step:
+            if elo_tick >= y_min - step:
+                total_rr = elo_tick - IMMORTAL_START
+                rank_name, _ = elo_to_rank_and_rr(elo_tick, radiant_threshold_rr)
+                ticks.append(elo_tick)
+                labels.append(f"{rank_name} ({total_rr} RR)")
+            elo_tick += step
 
     ax.set_yticks(ticks)
     ax.set_yticklabels(labels)
@@ -411,7 +452,7 @@ def plot_comparison(history: list[MatchPoint], sims: np.ndarray, name: str, tag:
         offset = (0, 12) if kind == "max" else (0, -16)
         va = "bottom" if kind == "max" else "top"
         ax.annotate(
-            format_rank_rr(val),
+            format_rank_rr(val, radiant_threshold_rr),
             xy=(idx, val),
             xytext=offset,
             textcoords="offset points",
@@ -426,7 +467,7 @@ def plot_comparison(history: list[MatchPoint], sims: np.ndarray, name: str, tag:
     padding = max(int(n * 0.15), 10)
     ax.set_xlim(0, n - 1 + padding)
     ax.annotate(
-        format_rank_rr(mean_sim[-1]),
+        format_rank_rr(mean_sim[-1], radiant_threshold_rr),
         xy=(len(mean_sim) - 1, mean_sim[-1]),
         xytext=(10, 0),
         textcoords="offset points",
@@ -450,8 +491,9 @@ def plot_comparison(history: list[MatchPoint], sims: np.ndarray, name: str, tag:
     return buf
 
 
-def build_mmr_graph(name: str, tag: str, region: str) -> io.BytesIO:
-    """Fonction bloquante complète : fetch + fit + simulate + plot. À lancer via asyncio.to_thread."""
+def build_mmr_graph(name: str, tag: str, region: str) -> tuple[io.BytesIO, int]:
+    """Fonction bloquante complète : fetch + fit + simulate + plot. À lancer via asyncio.to_thread.
+    Renvoie (image, seuil_radiant_rr_utilisé)."""
     cfg = Config(name=name, tag=tag, region=region)
     history = fetch_mmr_history(cfg, min_matches=10, max_matches=300)
 
@@ -460,13 +502,16 @@ def build_mmr_graph(name: str, tag: str, region: str) -> io.BytesIO:
             f"Seulement {len(history)} match(s) classé(s) trouvé(s) (minimum requis : 10)."
         )
 
+    radiant_threshold_rr = fetch_radiant_threshold_rr(region)
+
     start_state = to_state(history[0].elo, cfg.state_width)
     chain = ControlledMarkovChainOrder2(width=cfg.state_width)
     chain.fit(history)
     cond_rates = conditional_win_rates(history)
     sims = simulate_order2(chain, start_state, len(history) - 1, cond_rates, n_runs=200)
 
-    return plot_comparison(history, sims, name, tag)
+    image = plot_comparison(history, sims, name, tag, radiant_threshold_rr)
+    return image, radiant_threshold_rr
 
 
 # --------------------------------------------------------------------------- #
@@ -510,7 +555,7 @@ class MMRMarkov(commands.Cog):
             return
 
         try:
-            image_buffer = await asyncio.to_thread(build_mmr_graph, name, tag, region.value)
+            image_buffer, radiant_threshold_rr = await asyncio.to_thread(build_mmr_graph, name, tag, region.value)
         except ValueError as e:
             await self._safe_followup(interaction, str(e))
             return
@@ -535,7 +580,9 @@ class MMRMarkov(commands.Cog):
             description=(
                 "Modèle statistique (chaîne de Markov d'ordre 2) : la courbe noire est le MMR réel "
                 "(proxy), la rouge la moyenne simulée, la zone rose l'écart-type. Riot ne publie pas "
-                "la vraie formule, ceci est une approximation."
+                "la vraie formule, ceci est une approximation.\n\n"
+                f"Seuil Radiant utilisé pour ce graphique : **{radiant_threshold_rr} RR** "
+                "(RR du 500e joueur du classement live de cette région, `/radiant` pour vérifier)."
             ),
             color=discord.Color.red(),
         )

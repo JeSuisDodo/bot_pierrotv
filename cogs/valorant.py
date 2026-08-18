@@ -116,6 +116,58 @@ class Valorant(commands.Cog):
         except (discord.HTTPException, ConnectionError, OSError):
             pass
 
+    @app_commands.command(name="radiant", description="Affiche le seuil RR actuel pour être Radiant dans une région")
+    @app_commands.describe(region="Région à consulter")
+    @app_commands.choices(region=REGIONS)
+    async def radiant(self, interaction: discord.Interaction, region: app_commands.Choice[str]):
+        try:
+            await interaction.response.defer()
+        except (discord.HTTPException, ConnectionError, OSError):
+            return
+
+        url = f"https://api.henrikdev.xyz/valorant/v3/leaderboard/{region.value}/pc?start_index=500&size=1"
+        headers = {"Authorization": HENRIKDEV_API_KEY} if HENRIKDEV_API_KEY else {}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as resp:
+                    if resp.status != 200:
+                        await interaction.followup.send(f"Erreur de l'API Valorant (code {resp.status}).")
+                        return
+                    payload = await resp.json()
+        except Exception as e:
+            await interaction.followup.send(f"Erreur lors de la récupération du classement : {e}")
+            return
+
+        players = payload.get("data", {}).get("players", [])
+
+        if players:
+            threshold_rr = players[0].get("rr", 300)
+            player_name = players[0].get("name", "?")
+            player_tag = players[0].get("tag", "?")
+            description = (
+                f"Le seuil actuel pour être Radiant en **{region.name}** est de **{threshold_rr} RR**.\n"
+                f"C'est le RR du 500e joueur du classement (`{player_name}#{player_tag}`)."
+            )
+        else:
+            threshold_rr = 300
+            description = (
+                f"Moins de 500 joueurs classés au-delà d'Immortel en **{region.name}**.\n"
+                f"Le seuil Radiant retombe donc sur le plancher théorique : **{threshold_rr} RR**."
+            )
+
+        embed = discord.Embed(
+            title="🏆 Seuil Radiant",
+            description=description,
+            color=discord.Color.red(),
+        )
+        embed.set_footer(text="Ce seuil bouge en continu avec l'activité du classement.")
+
+        try:
+            await interaction.followup.send(embed=embed)
+        except (discord.HTTPException, ConnectionError, OSError):
+            pass
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Valorant(bot))
