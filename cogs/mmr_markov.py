@@ -57,15 +57,53 @@ def elo_to_rank(elo: float) -> str:
     return rank
 
 
+RADIANT_THRESHOLD = RANK_TIERS[-1][0]  # 2400 : seuil d'entrée en Radiant
+
+
+def elo_to_rank_and_rr(elo: float) -> tuple[str, int]:
+    """Convertit une valeur d'elo en (nom du rang, RR dans ce rang).
+    En dessous de Radiant, chaque rang fait 100 RR de large (0-100).
+    Radiant n'a pas de plafond : le RR continue de grimper sans jamais reset
+    (le seuil réel dépend du top 500 de la région et varie légèrement,
+    ceci reste une approximation basée sur l'echelle du modèle)."""
+    if elo >= RADIANT_THRESHOLD:
+        return "Radiant", int(round(elo - RADIANT_THRESHOLD))
+
+    idx = max(0, min(int(elo // 100), len(RANK_TIERS) - 2))
+    threshold, name = RANK_TIERS[idx]
+    rr = int(round(elo - threshold))
+    rr = max(0, min(rr, 99))
+    return name, rr
+
+
+def format_rank_rr(elo: float) -> str:
+    rank, rr = elo_to_rank_and_rr(elo)
+    return f"{rank} ({rr} RR)"
+
+
 def find_local_extrema(
-    values: np.ndarray, window: int = 15, max_points: int = 6
+    values: np.ndarray, window: int = 15, max_points: int = 8
 ) -> list[tuple[int, float, str]]:
     """Repère les pics/creux locaux significatifs (indice, valeur, 'max' ou 'min'),
     en fusionnant les points trop proches et en limitant le nombre affiché
-    pour garder le graphique lisible."""
+    pour garder le graphique lisible. Le maximum et le minimum globaux de
+    toute la courbe sont TOUJOURS inclus, même si l'algorithme de fenêtre
+    glissante ne les aurait pas retenus."""
     n = len(values)
-    if n < 2 * window + 1:
+    if n == 0:
         return []
+
+    global_max_idx = int(np.argmax(values))
+    global_min_idx = int(np.argmin(values))
+    guaranteed = [
+        (global_max_idx, float(values[global_max_idx]), "max"),
+        (global_min_idx, float(values[global_min_idx]), "min"),
+    ]
+
+    if n < 2 * window + 1:
+        # Historique trop court pour la détection par fenêtre : on renvoie
+        # au moins les extremums globaux garantis.
+        return sorted(guaranteed, key=lambda c: c[0])
 
     candidates: list[tuple[int, float, str]] = []
     for i in range(window, n - window):
@@ -88,11 +126,26 @@ def find_local_extrema(
             continue
         merged.append(cand)
 
-    # Limite au N points les plus marqués (par écart à la médiane), remis dans l'ordre chronologique
+    # S'assure que le max/min global est présent (fusionné avec un candidat
+    # proche existant, sinon ajouté explicitement)
+    for g_idx, g_val, g_kind in guaranteed:
+        near = next((c for c in merged if abs(c[0] - g_idx) < window), None)
+        if near is None:
+            merged.append((g_idx, g_val, g_kind))
+        elif near[1] != g_val:
+            merged[merged.index(near)] = (g_idx, g_val, g_kind)
+    merged.sort(key=lambda c: c[0])
+
+    # Limite au N points les plus marqués (par écart à la médiane), en gardant
+    # TOUJOURS le max et le min globaux, puis complète avec les plus notables
     if len(merged) > max_points:
         median = float(np.median(values))
-        merged.sort(key=lambda c: abs(c[1] - median), reverse=True)
-        merged = merged[:max_points]
+        mandatory_idx = {global_max_idx, global_min_idx}
+        mandatory = [c for c in merged if c[0] in mandatory_idx]
+        rest = [c for c in merged if c[0] not in mandatory_idx]
+        rest.sort(key=lambda c: abs(c[1] - median), reverse=True)
+        remaining_slots = max(0, max_points - len(mandatory))
+        merged = mandatory + rest[:remaining_slots]
         merged.sort(key=lambda c: c[0])
 
     return merged
@@ -336,17 +389,29 @@ def plot_comparison(history: list[MatchPoint], sims: np.ndarray, name: str, tag:
     y_min, y_max = ax.get_ylim()
     ticks = [t for t, _ in RANK_TIERS if y_min - 100 <= t <= y_max + 100]
     labels = [name_ for t, name_ in RANK_TIERS if y_min - 100 <= t <= y_max + 100]
+
+    # Au-dessus de Radiant, il n'y a plus de palier fixe (le seuil dépend du
+    # top 500 régional) : on ajoute des graduations tous les 100 RR pour ne
+    # pas perdre les repères visuels au-delà de ce point.
+    if y_max > RADIANT_THRESHOLD:
+        step = 100
+        rr_tick = RADIANT_THRESHOLD + step
+        while rr_tick <= y_max + step:
+            ticks.append(rr_tick)
+            labels.append(f"Radiant +{rr_tick - RADIANT_THRESHOLD} RR")
+            rr_tick += step
+
     ax.set_yticks(ticks)
     ax.set_yticklabels(labels)
     ax.grid(axis="y", alpha=0.2)
 
-    # --- Extremums locaux du rang réel, annotés avec le nom du rang ---
+    # --- Extremums (dont le max/min global garanti), annotés avec rang + RR ---
     extrema = find_local_extrema(real_elo)
     for idx, val, kind in extrema:
         offset = (0, 12) if kind == "max" else (0, -16)
         va = "bottom" if kind == "max" else "top"
         ax.annotate(
-            elo_to_rank(val),
+            format_rank_rr(val),
             xy=(idx, val),
             xytext=offset,
             textcoords="offset points",
@@ -357,11 +422,11 @@ def plot_comparison(history: list[MatchPoint], sims: np.ndarray, name: str, tag:
             arrowprops=dict(arrowstyle="-", color="gray", lw=0.7),
         )
 
-    # --- Rang actuel affiché à droite de la courbe simulée (rouge) ---
+    # --- Rang + RR actuel affiché à droite de la courbe simulée (rouge) ---
     padding = max(int(n * 0.15), 10)
     ax.set_xlim(0, n - 1 + padding)
     ax.annotate(
-        elo_to_rank(mean_sim[-1]),
+        format_rank_rr(mean_sim[-1]),
         xy=(len(mean_sim) - 1, mean_sim[-1]),
         xytext=(10, 0),
         textcoords="offset points",
