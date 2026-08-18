@@ -75,10 +75,48 @@ class Info(commands.Cog):
     @app_commands.command(name="commandes", description="Liste toutes les commandes disponibles")
     async def commandes(self, interaction: discord.Interaction):
         embed = discord.Embed(
-            title="Commandes disponibles",
-            description="\n".join(f"`/{key}`" for key in INFO_DATA),
+            title="📜 Commandes disponibles",
+            description="Voici toutes les commandes utilisables sur le serveur.",
             color=discord.Color.green(),
         )
+
+        embed.add_field(
+            name="🖥️ Setup gaming",
+            value=(
+                "`/crosshair` — Crosshair Valorant utilisé\n"
+                "`/clavier` (ou `/keybord`) — Clavier utilisé\n"
+                "`/souris` (ou `/mouse`) — Souris utilisée\n"
+                "`/tapis` (ou `/mousepad`) — Tapis de souris utilisé\n"
+                "`/ecran` (ou `/monitor`) — Écran utilisé\n"
+                "`/casque` (ou `/headphone`) — Casque utilisé\n"
+                "`/sensi` (ou `/sens`, `/sensibilite`) — Sensibilité de souris\n"
+                "`/resolution` (ou `/res`) — Résolution de jeu\n"
+                "`/kovaak` — Scénarios Kovaak's utilisés à l'entraînement"
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="🎯 Valorant",
+            value=(
+                "`/rank <pseudo> <région>` — Rank actuel d'un joueur\n"
+                "`/radiant <région>` — Seuil RR actuel pour être Radiant dans une région\n"
+                "`/mmr <pseudo> <région>` — Graphique de progression du MMR (1 utilisation/semaine)"
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="🚗 Économie & voitures",
+            value=(
+                "`/guide` — Explique tout le système d'argent et de voitures du serveur : "
+                "comment gagner de l'argent, la concession, ton garage, l'hôtel des ventes..."
+            ),
+            inline=False,
+        )
+
+        embed.set_footer(text="Utilise /guide pour tout savoir sur l'économie et les voitures du serveur.")
+
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="crosshair", description="Affiche le crosshair")

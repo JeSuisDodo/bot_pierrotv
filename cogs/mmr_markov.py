@@ -618,6 +618,7 @@ class MMRMarkov(commands.Cog):
         region="Région du compte",
     )
     @app_commands.choices(region=REGIONS)
+    @app_commands.checks.cooldown(1, 604800.0, key=lambda i: i.user.id)  # 1 utilisation / semaine / utilisateur
     async def mmr(self, interaction: discord.Interaction, pseudo: str, region: app_commands.Choice[str]):
         if "#" not in pseudo:
             await interaction.response.send_message(
@@ -670,6 +671,33 @@ class MMRMarkov(commands.Cog):
             await interaction.followup.send(embed=embed, file=file)
         except (discord.HTTPException, ConnectionError, OSError):
             pass  # coupure réseau transitoire, rien à faire de plus
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.CommandOnCooldown):
+            retry_after = int(error.retry_after)
+            days, rest = divmod(retry_after, 86400)
+            hours, rest = divmod(rest, 3600)
+            minutes = rest // 60
+
+            parts = []
+            if days:
+                parts.append(f"{days}j")
+            if hours:
+                parts.append(f"{hours}h")
+            if minutes and not days:  # évite d'afficher les minutes si on est déjà à plusieurs jours
+                parts.append(f"{minutes}m")
+            delay_str = " ".join(parts) if parts else "quelques secondes"
+
+            message = f"⏳ Tu pourras réutiliser cette commande dans {delay_str}."
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(message, ephemeral=True)
+                else:
+                    await interaction.response.send_message(message, ephemeral=True)
+            except (discord.HTTPException, ConnectionError, OSError):
+                pass
+        else:
+            raise error
 
 
 async def setup(bot: commands.Bot):
