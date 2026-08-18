@@ -39,7 +39,8 @@ EXTENSIONS = [
     "cogs.mmr_markov"
 ]
  
- 
+GUILD_ID = discord.Object(id=834429780916830280)  # ton ID de serveur, comme avant
+
 @bot.event
 async def on_ready():
     for ext in EXTENSIONS:
@@ -47,8 +48,9 @@ async def on_ready():
             await bot.load_extension(ext)
         except Exception as e:
             print(f"Erreur lors du chargement de {ext} : {e}")
- 
-    synced = await bot.tree.sync()
+
+    bot.tree.copy_global_to(guild=GUILD_ID)
+    synced = await bot.tree.sync(guild=GUILD_ID)
     print(f"{len(synced)} commandes slash synchronisées.")
     print(f"Connecté en tant que {bot.user}")
  
