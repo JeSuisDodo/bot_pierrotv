@@ -1,12 +1,33 @@
 import os
 import discord
+from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
- 
+
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
+
+# Salons où les commandes slash sont interdites
+RESTRICTED_CHANNEL_IDS = {
+    834429780916830283,   # discussion
+    1335703030624030720,  # clip-réact
+    1132759889089925200,  # clips
+    1528031041267171398,  # trouver-un-mate
+    1217967810177662986,  # médias
+}
+
+
+class RestrictedCommandTree(app_commands.CommandTree):
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.channel_id in RESTRICTED_CHANNEL_IDS:
+            await interaction.response.send_message(
+                "❌ Les commandes ne sont pas autorisées dans ce salon.",
+                ephemeral=True,
+            )
+            return False
+        return True
  
 # Serveur Flask pour garder le bot éveillé sur Render (via UptimeRobot)
 app = Flask('')
@@ -24,7 +45,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True  # nécessaire pour le ban
  
-bot = commands.Bot(command_prefix="$", intents=intents)
+bot = commands.Bot(command_prefix="$", intents=intents, tree_cls=RestrictedCommandTree)
  
 EXTENSIONS = [
     "cogs.moderation",
