@@ -440,19 +440,19 @@ def plot_comparison(
     ticks = [t for t, _ in RANK_TIERS if y_min - 100 <= t <= min(y_max + 100, IMMORTAL_START)]
     labels = [name_ for t, name_ in RANK_TIERS if y_min - 100 <= t <= min(y_max + 100, IMMORTAL_START)]
 
-    # À partir d'Immortel, le RR est cumulatif (pas de reset) : on place une
-    # graduation tous les 100 RR, avec le nom du rang correspondant à ce
-    # RR cumulé (Immortel 1/2/3 puis Radiant une fois le seuil live dépassé).
-    if y_max >= IMMORTAL_START:
-        step = 100
-        elo_tick = IMMORTAL_START
-        while elo_tick <= y_max + step:
-            if elo_tick >= y_min - step:
-                total_rr = elo_tick - IMMORTAL_START
-                rank_name, _ = elo_to_rank_and_rr(elo_tick, radiant_threshold_rr)
-                ticks.append(elo_tick)
-                labels.append(f"{rank_name} ({total_rr} RR)")
-            elo_tick += step
+    # À partir d'Immortel, on n'affiche que deux repères : le début
+    # d'Immortel 3 (200 RR cumulés) et le début de Radiant (seuil live
+    # actuel), sans graduation intermédiaire tous les 100 RR.
+    immortel3_elo = IMMORTAL_START + 200
+    radiant_elo = IMMORTAL_START + radiant_threshold_rr
+
+    if y_min - 100 <= immortel3_elo <= y_max + 100:
+        ticks.append(immortel3_elo)
+        labels.append("Immortel 3")
+
+    if y_min - 100 <= radiant_elo <= y_max + 100:
+        ticks.append(radiant_elo)
+        labels.append("Radiant")
 
     ax.set_yticks(ticks)
     ax.set_yticklabels(labels)
