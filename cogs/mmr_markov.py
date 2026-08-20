@@ -116,15 +116,13 @@ def elo_to_color(elo: float, radiant_threshold_rr: int = DEFAULT_RADIANT_THRESHO
 
 
 def fetch_radiant_threshold_rr(region: str, platform: str = "pc") -> int:
-    """Récupère le RR du 500e joueur du classement live (seuil réel d'entrée
-    en Radiant pour cette région). Si le classement compte moins de 500
-    joueurs (région peu peuplée), on retombe sur le seuil plancher de 300 RR.
+    """Récupère le seuil Radiant officiel pour cette région.
 
-    On récupère les 500 premiers joueurs d'un coup (size=500) plutôt que de
-    se fier au paramètre de pagination start_index=500 seul : certains CDN/
-    caches renvoient la première page par défaut quand start_index est
-    utilisé isolément, ce qui donnerait le RR du joueur classé 1er au lieu
-    du 500e."""
+    L'API renvoie directement le vrai seuil calculé par Riot dans
+    "data.thresholds" (entrée avec tier.name == "Radiant"). Se baser sur le
+    RR du 500e joueur du classement (ancienne approche) est peu fiable : le
+    nombre de joueurs Radiant n'est pas toujours exactement 500, ça dépend
+    de la région/saison."""
     if not HENRIKDEV_API_KEY:
         return DEFAULT_RADIANT_THRESHOLD_RR
 
@@ -133,15 +131,13 @@ def fetch_radiant_threshold_rr(region: str, platform: str = "pc") -> int:
         resp = requests.get(url, headers={"Authorization": HENRIKDEV_API_KEY}, timeout=20)
         resp.raise_for_status()
         payload = resp.json()
-        players = payload.get("data", {}).get("players", [])
-        if len(players) >= 500:
-            player_500 = players[499]
-            # Garde-fou : si le rang renvoyé n'est pas proche de 500, la
-            # pagination n'a probablement pas été respectée par l'API/CDN.
-            reported_rank = player_500.get("leaderboard_rank")
-            if reported_rank is not None and abs(reported_rank - 500) > 20:
-                return DEFAULT_RADIANT_THRESHOLD_RR
-            return int(player_500.get("rr", DEFAULT_RADIANT_THRESHOLD_RR))
+        data = payload.get("data", {})
+        radiant_threshold = next(
+            (t for t in data.get("thresholds", []) if t.get("tier", {}).get("name") == "Radiant"),
+            None,
+        )
+        if radiant_threshold is not None:
+            return int(radiant_threshold.get("threshold", DEFAULT_RADIANT_THRESHOLD_RR))
     except Exception:
         pass
     return DEFAULT_RADIANT_THRESHOLD_RR

@@ -139,31 +139,39 @@ class Valorant(commands.Cog):
             await interaction.followup.send(f"Erreur lors de la récupération du classement : {e}")
             return
 
-        players = payload.get("data", {}).get("players", [])
-        reported_rank = players[499].get("leaderboard_rank") if len(players) >= 500 else None
-        pagination_reliable = len(players) >= 500 and (reported_rank is None or abs(reported_rank - 500) <= 20)
+        data = payload.get("data", {})
+        players = data.get("players", [])
 
-        if pagination_reliable:
+        # Le nombre de joueurs Radiant n'est pas toujours exactement 500 (ça dépend
+        # de la région/saison), donc se baser sur le RR du 500e joueur est peu fiable.
+        # L'API renvoie directement le vrai seuil calculé par Riot dans "thresholds".
+        radiant_threshold = next(
+            (t for t in data.get("thresholds", []) if t.get("tier", {}).get("name") == "Radiant"),
+            None,
+        )
+
+        if radiant_threshold is not None:
+            threshold_rr = radiant_threshold.get("threshold", 300)
+            description = (
+                f"Le seuil actuel pour être Radiant en **{region.name}** est de **{threshold_rr} RR**.\n"
+                f"C'est le seuil officiel calculé par Riot, renvoyé directement par l'API."
+            )
+        elif len(players) >= 500:
             player_500 = players[499]
             threshold_rr = player_500.get("rr", 300)
             player_name = player_500.get("name", "?")
             player_tag = player_500.get("tag", "?")
             description = (
-                f"Le seuil actuel pour être Radiant en **{region.name}** est de **{threshold_rr} RR**.\n"
-                f"C'est le RR du 500e joueur du classement (`{player_name}#{player_tag}`)."
-            )
-        elif len(players) < 500:
-            threshold_rr = 300
-            description = (
-                f"Moins de 500 joueurs classés au-delà d'Immortel en **{region.name}**.\n"
-                f"Le seuil Radiant retombe donc sur le plancher théorique : **{threshold_rr} RR**."
+                f"Le seuil actuel pour être Radiant en **{region.name}** est estimé à **{threshold_rr} RR**.\n"
+                f"L'API n'a pas renvoyé de seuil officiel : estimation basée sur le RR du 500e joueur "
+                f"du classement (`{player_name}#{player_tag}`)."
             )
         else:
             threshold_rr = 300
             description = (
-                f"Impossible de confirmer la position exacte du 500e joueur en **{region.name}** "
-                f"(l'API n'a pas renvoyé le bon classement). Seuil plancher utilisé par défaut : "
-                f"**{threshold_rr} RR**."
+                f"Moins de 500 joueurs classés au-delà d'Immortel en **{region.name}**, et l'API n'a "
+                f"pas renvoyé de seuil officiel.\nLe seuil Radiant retombe donc sur le plancher "
+                f"théorique : **{threshold_rr} RR**."
             )
 
         embed = discord.Embed(
