@@ -1,10 +1,20 @@
 import os
+import re
 import discord
 from discord import app_commands
 from discord.ext import commands
 import aiohttp
 
 HENRIKDEV_API_KEY = os.getenv("HENRIKDEV_API_KEY")
+
+
+def format_peak_season(season_short: str) -> str:
+    """Convertit un code de saison HenrikDev ('e6a3') en texte lisible ('Épisode 6 Acte 3')."""
+    match = re.fullmatch(r"e(\d+)a(\d+)", season_short or "")
+    if not match:
+        return season_short or "saison inconnue"
+    episode, act = match.groups()
+    return f"Épisode {episode} Acte {act}"
 
 REGIONS = [
     app_commands.Choice(name="Europe", value="eu"),
@@ -95,6 +105,10 @@ class Valorant(commands.Cog):
                 rr = current.get("rr", 0)
                 elo = current.get("elo", "N/A")
 
+                peak = data.get("data", {}).get("peak", {})
+                peak_tier_name = peak.get("tier", {}).get("name")
+                peak_season = format_peak_season(peak.get("season", {}).get("short"))
+
                 icons = await get_tier_icons(session)
                 rank_icon = icons.get(tier.get("id"))
         except Exception as e:
@@ -108,6 +122,8 @@ class Valorant(commands.Cog):
         )
         embed.add_field(name="Elo", value=str(elo), inline=True)
         embed.add_field(name="Région", value=region.name, inline=True)
+        if peak_tier_name:
+            embed.add_field(name="🏔️ Peak rank", value=f"{peak_tier_name} ({peak_season})", inline=True)
         if rank_icon:
             embed.set_thumbnail(url=rank_icon)
 
