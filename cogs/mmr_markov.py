@@ -339,6 +339,19 @@ def to_state(elo: int, width: int) -> int:
     return elo // width
 
 
+def adaptive_state_width(n_matches: int) -> int:
+    """Largeur de tranche d'elo adaptée à la richesse de l'historique. Avec peu de
+    matchs, des tranches fines (25) laissent trop peu d'exemples par état pour être
+    fiables (le modèle finit par tomber sur les replis génériques ci-dessous plus
+    souvent que sur de vraies données) ; des tranches plus larges regroupent plus
+    d'observations par état pour un historique court."""
+    if n_matches < 30:
+        return 50
+    if n_matches < 100:
+        return 35
+    return 25
+
+
 class ControlledMarkovChainOrder2:
     order = 2
     START = "start"
@@ -348,6 +361,14 @@ class ControlledMarkovChainOrder2:
         self.counts: dict[str, dict[tuple, dict[int, int]]] = {
             "win": defaultdict(lambda: defaultdict(int)),
             "loss": defaultdict(lambda: defaultdict(int)),
+        }
+        # Repli de dernier recours : distribution globale des déplacements
+        # (bucket_suivant - bucket_actuel) observés pour ce résultat, tous
+        # états confondus. Utilisée quand une tranche d'elo n'a jamais été
+        # visitée dans l'historique du joueur (voir transition_row).
+        self.global_deltas: dict[str, dict[int, int]] = {
+            "win": defaultdict(int),
+            "loss": defaultdict(int),
         }
         self.states: set[int] = set()
 
@@ -363,22 +384,37 @@ class ControlledMarkovChainOrder2:
             self.states.add(bucket_i)
             self.states.add(bucket_next)
             self.counts[next_result][aug_state][bucket_next] += 1
+            self.global_deltas[next_result][bucket_next - bucket_i] += 1
 
     def transition_row(self, result: str, aug_state: tuple) -> dict[int, float]:
         row = self.counts[result].get(aug_state)
-        if not row:
-            bucket, _ = aug_state
-            merged: dict[int, int] = defaultdict(int)
-            for (b, _prev), sub_row in self.counts[result].items():
-                if b == bucket:
-                    for j, c in sub_row.items():
-                        merged[j] += c
-            if merged:
-                total = sum(merged.values())
-                return {j: c / total for j, c in merged.items()}
-            return {bucket: 1.0}
-        total = sum(row.values())
-        return {j: c / total for j, c in row.items()}
+        if row:
+            total = sum(row.values())
+            return {j: c / total for j, c in row.items()}
+
+        bucket, _ = aug_state
+        merged: dict[int, int] = defaultdict(int)
+        for (b, _prev), sub_row in self.counts[result].items():
+            if b == bucket:
+                for j, c in sub_row.items():
+                    merged[j] += c
+        if merged:
+            total = sum(merged.values())
+            return {j: c / total for j, c in merged.items()}
+
+        # Cette tranche n'a jamais été vue en historique pour ce résultat (ex: la
+        # simulation dérive au-delà de tout ce que le joueur a réellement atteint).
+        # Sans ce repli, on renverrait {bucket: 1.0} et la trajectoire simulée
+        # resterait figée indéfiniment dès qu'elle atteint une tranche inédite.
+        # On applique plutôt le profil de déplacement global du joueur pour ce
+        # résultat, recentré sur la tranche actuelle, pour que la simulation
+        # continue à bouger de façon plausible.
+        deltas = self.global_deltas[result]
+        if deltas:
+            total = sum(deltas.values())
+            return {bucket + delta: c / total for delta, c in deltas.items()}
+
+        return {bucket: 1.0}  # dernier recours : vraiment aucune donnée disponible
 
     def sample_next_state(self, result: str, aug_state: tuple, rng: np.random.Generator) -> int:
         row = self.transition_row(result, aug_state)
@@ -410,7 +446,7 @@ def simulate_order2(
     start_state: int,
     n_steps: int,
     cond_win_rates: dict[str, float],
-    n_runs: int = 200,
+    n_runs: int = 1000,
     seed: int = 0,
 ) -> np.ndarray:
     rng = np.random.default_rng(seed)
@@ -581,11 +617,12 @@ def build_mmr_graph(name: str, tag: str, region: str) -> tuple[io.BytesIO, int]:
 
     radiant_threshold_rr = fetch_radiant_threshold_rr(region)
 
+    cfg.state_width = adaptive_state_width(len(history))
     start_state = to_state(history[0].elo, cfg.state_width)
     chain = ControlledMarkovChainOrder2(width=cfg.state_width)
     chain.fit(history)
     cond_rates = conditional_win_rates(history)
-    sims = simulate_order2(chain, start_state, len(history) - 1, cond_rates, n_runs=200)
+    sims = simulate_order2(chain, start_state, len(history) - 1, cond_rates, n_runs=1000)
 
     image = plot_comparison(history, sims, name, tag, radiant_threshold_rr)
     return image, radiant_threshold_rr
