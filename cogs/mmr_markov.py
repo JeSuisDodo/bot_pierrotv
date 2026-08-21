@@ -340,8 +340,8 @@ def _filter_season_starts(points: list[MatchPoint], skip: int = SEASON_START_SKI
     return filtered
 
 
-def _get(url: str, api_key: str) -> dict:
-    resp = requests.get(url, headers={"Authorization": api_key}, timeout=15)
+def _get(url: str, api_key: str, timeout: float = 15) -> dict:
+    resp = requests.get(url, headers={"Authorization": api_key}, timeout=timeout)
     resp.raise_for_status()
     return resp.json()
 
@@ -386,8 +386,13 @@ def average_lobby_elo(players: list[dict], exclude_name: str, exclude_tag: str) 
 
 
 def fetch_match_detail(cfg: Config, match_id: str) -> dict:
+    """Timeout volontairement court (6s, contre 15s par défaut) : c'est un
+    enrichissement optionnel (voir compute_lobby_adjustment) appelé jusqu'à 20 fois
+    de suite, pas la fonctionnalité principale. Mieux vaut échouer vite sur un match
+    et passer au suivant que de laisser /mmr bloqué plusieurs minutes si l'API est
+    lente à répondre sur certains matchs."""
     url = f"https://api.henrikdev.xyz/valorant/v4/match/{cfg.region}/{match_id}"
-    return _get(url, cfg.api_key)
+    return _get(url, cfg.api_key, timeout=6)
 
 
 def compute_lobby_adjustment(
@@ -887,11 +892,13 @@ class MMRMarkov(commands.Cog):
     @staticmethod
     async def _safe_followup(interaction: discord.Interaction, content: str) -> None:
         """Envoie un followup en avalant les erreurs réseau/expiration d'interaction,
-        pour éviter un traceback brut dans les logs sur un simple aléa de connexion."""
+        pour éviter un traceback brut dans les logs sur un simple aléa de connexion.
+        Attrape Exception au sens large (pas juste les erreurs réseau connues) : mieux
+        vaut logger un cas imprévu que laisser l'utilisateur sans aucune réponse."""
         try:
             await interaction.followup.send(content)
-        except (discord.HTTPException, ConnectionError, OSError):
-            pass
+        except Exception as e:
+            print(f"[MMR] Impossible d'envoyer le message d'erreur ('{content}') : {e}")
 
     @app_commands.command(name="mmr", description="Affiche la progression du MMR d'un joueur (modèle statistique)")
     @app_commands.describe(
@@ -920,20 +927,25 @@ class MMRMarkov(commands.Cog):
         try:
             image_buffer, radiant_threshold_rr = await asyncio.to_thread(build_mmr_graph, name, tag, region.value)
         except ValueError as e:
+            print(f"[MMR] {name}#{tag} ({region.value}) : {e}")
             await self._safe_followup(interaction, str(e))
             return
         except RuntimeError as e:
+            print(f"[MMR] {name}#{tag} ({region.value}) : {e}")
             await self._safe_followup(interaction, str(e))
             return
         except requests.exceptions.HTTPError as e:
+            print(f"[MMR] {name}#{tag} ({region.value}) : erreur API HenrikDev : {e}")
             await self._safe_followup(interaction, f"Erreur de l'API Valorant : {e}")
             return
         except (ConnectionError, OSError, requests.exceptions.ConnectionError) as e:
+            print(f"[MMR] {name}#{tag} ({region.value}) : erreur réseau : {e}")
             await self._safe_followup(
                 interaction, "Problème réseau temporaire pendant la récupération des données. Réessaie dans quelques instants."
             )
             return
         except Exception as e:
+            print(f"[MMR] {name}#{tag} ({region.value}) : erreur inattendue : {type(e).__name__}: {e}")
             await self._safe_followup(interaction, f"Erreur inattendue : {e}")
             return
 
