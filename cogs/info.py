@@ -99,7 +99,8 @@ class Info(commands.Cog):
         embed.add_field(
             name="🎯 Valorant",
             value=(
-                "`/rank <pseudo> <région>` — Rank actuel d'un joueur\n"
+                "`/profil <pseudo> <région>` — Profil complet d'un joueur : rank, peak rank, "
+                "et 5 derniers matchs cliquables (scoreboard, puis profil des autres joueurs)\n"
                 "`/radiant <région>` — Seuil RR actuel pour être Radiant dans une région\n"
                 "`/mmr <pseudo> <région>` — Graphique de progression du MMR (1 utilisation/semaine)"
             ),
