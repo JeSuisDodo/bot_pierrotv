@@ -233,6 +233,7 @@ class MatchPoint:
     rr_delta: int
     result: str  # "win" ou "loss"
     match_id: Optional[str] = None
+    season: Optional[str] = None
 
 
 @dataclass
@@ -256,15 +257,41 @@ def _parse_entries(entries: list[dict]) -> list[MatchPoint]:
             continue
         result = "win" if delta >= 0 else "loss"
         match_id = entry.get("match_id")
-        points.append(MatchPoint(date=date, elo=elo, rr_delta=delta, result=result, match_id=match_id))
+        season = entry.get("season", {}).get("short")
+        points.append(MatchPoint(date=date, elo=elo, rr_delta=delta, result=result, match_id=match_id, season=season))
     points.reverse()
-    return _filter_valid_elo(points)
+    return _filter_season_starts(_filter_valid_elo(points))
 
 
 def _filter_valid_elo(points: list[MatchPoint]) -> list[MatchPoint]:
     """Retire les points à elo=0 : resets de saison / placements non classés,
     qui ne reflètent pas un vrai MMR et faussent le graphique."""
     return [p for p in points if p.elo > 0]
+
+
+SEASON_START_SKIP = 15
+
+
+def _filter_season_starts(points: list[MatchPoint], skip: int = SEASON_START_SKIP) -> list[MatchPoint]:
+    """Retire les `skip` premiers matchs de chaque nouvelle saison détectée dans
+    l'historique (y compris la toute première saison visible dans les données
+    récupérées). Un début de saison/acte remet souvent le joueur à un rang très
+    différent de son vrai niveau (matchs de placement, RR encore instable), ce qui
+    crée des chutes/remontées brutales qui polluent aussi bien le graphique (chute
+    suivie d'un pic annoté comme si c'était un vrai extremum de performance) que
+    l'apprentissage du modèle. `points` doit déjà être trié chronologiquement."""
+    filtered: list[MatchPoint] = []
+    current_season = object()  # sentinel : garantit que le tout premier point déclenche un skip
+    skip_remaining = 0
+    for point in points:
+        if point.season != current_season:
+            current_season = point.season
+            skip_remaining = skip
+        if skip_remaining > 0:
+            skip_remaining -= 1
+            continue
+        filtered.append(point)
+    return filtered
 
 
 def _get(url: str, api_key: str) -> dict:
