@@ -469,28 +469,48 @@ def adaptive_state_width(n_matches: int) -> int:
     return 25
 
 
+RECENCY_HALF_LIFE = 60
+
+
+def recency_weight(index: int, n: int, half_life: float = RECENCY_HALF_LIFE) -> float:
+    """Poids exponentiel décroissant avec l'ancienneté d'un match : un match
+    d'aujourd'hui pèse deux fois plus qu'un match vieux de `half_life` matchs dans
+    l'apprentissage du modèle. `index` est la position chronologique (0 = plus
+    ancien, n-1 = plus récent) sur un historique de longueur `n`.
+
+    Sans cette pondération, la chaîne apprend un comportement "moyen" sur toute la
+    période récupérée (jusqu'à ~300 matchs) : une vraie tendance récente (le joueur
+    progresse ou régresse nettement ces dernières semaines) se retrouve diluée par
+    des matchs bien plus anciens, et la courbe simulée reste quasi plate au lieu de
+    suivre la dynamique récente. Heuristique (valeur de demi-vie choisie, pas
+    calibrée statistiquement), documentée comme telle."""
+    age = (n - 1) - index
+    return 0.5 ** (age / half_life)
+
+
 class ControlledMarkovChainOrder2:
     order = 2
     START = "start"
 
     def __init__(self, width: int):
         self.width = width
-        self.counts: dict[str, dict[tuple, dict[int, int]]] = {
-            "win": defaultdict(lambda: defaultdict(int)),
-            "loss": defaultdict(lambda: defaultdict(int)),
+        self.counts: dict[str, dict[tuple, dict[int, float]]] = {
+            "win": defaultdict(lambda: defaultdict(float)),
+            "loss": defaultdict(lambda: defaultdict(float)),
         }
         # Repli de dernier recours : distribution globale des déplacements
         # (bucket_suivant - bucket_actuel) observés pour ce résultat, tous
         # états confondus. Utilisée quand une tranche d'elo n'a jamais été
         # visitée dans l'historique du joueur (voir transition_row).
-        self.global_deltas: dict[str, dict[int, int]] = {
-            "win": defaultdict(int),
-            "loss": defaultdict(int),
+        self.global_deltas: dict[str, dict[int, float]] = {
+            "win": defaultdict(float),
+            "loss": defaultdict(float),
         }
         self.states: set[int] = set()
 
     def fit(self, history: list[MatchPoint]) -> None:
-        for i in range(len(history) - 1):
+        n = len(history)
+        for i in range(n - 1):
             bucket_i = to_state(history[i].elo, self.width)
             prev_result = history[i].result if i > 0 else self.START
             aug_state = (bucket_i, prev_result)
@@ -498,10 +518,17 @@ class ControlledMarkovChainOrder2:
             bucket_next = to_state(history[i + 1].elo, self.width)
             next_result = history[i + 1].result
 
+            # Un match récent pèse plus qu'un match ancien dans l'apprentissage :
+            # sans ça, la chaîne apprend un comportement "moyen" sur toute la
+            # période (ex: 250 matchs), qui dilue une vraie tendance récente
+            # (progression ou régression marquée en fin d'historique) au point
+            # de rendre la courbe simulée quasi plate. Voir recency_weight.
+            weight = recency_weight(i + 1, n)
+
             self.states.add(bucket_i)
             self.states.add(bucket_next)
-            self.counts[next_result][aug_state][bucket_next] += 1
-            self.global_deltas[next_result][bucket_next - bucket_i] += 1
+            self.counts[next_result][aug_state][bucket_next] += weight
+            self.global_deltas[next_result][bucket_next - bucket_i] += weight
 
     def transition_row(self, result: str, aug_state: tuple) -> dict[int, float]:
         row = self.counts[result].get(aug_state)
@@ -510,7 +537,7 @@ class ControlledMarkovChainOrder2:
             return {j: c / total for j, c in row.items()}
 
         bucket, _ = aug_state
-        merged: dict[int, int] = defaultdict(int)
+        merged: dict[int, float] = defaultdict(float)
         for (b, _prev), sub_row in self.counts[result].items():
             if b == bucket:
                 for j, c in sub_row.items():
@@ -540,18 +567,27 @@ class ControlledMarkovChainOrder2:
 
 
 def win_rate(history: list[MatchPoint]) -> float:
-    wins = sum(1 for m in history if m.result == "win")
-    return wins / len(history) if history else 0.5
+    """Taux de victoire pondéré par récence (voir recency_weight) : reflète la
+    forme récente du joueur plutôt qu'une moyenne plate sur tout l'historique."""
+    if not history:
+        return 0.5
+    n = len(history)
+    weighted_wins = sum(recency_weight(i, n) for i, m in enumerate(history) if m.result == "win")
+    total_weight = sum(recency_weight(i, n) for i in range(n))
+    return weighted_wins / total_weight if total_weight else 0.5
 
 
 def conditional_win_rates(history: list[MatchPoint]) -> dict[str, float]:
     overall = win_rate(history)
-    tallies: dict[str, list[int]] = {"win": [0, 0], "loss": [0, 0]}
-    for prev, curr in zip(history, history[1:]):
-        tallies.setdefault(prev.result, [0, 0])
-        tallies[prev.result][1] += 1
+    n = len(history)
+    tallies: dict[str, list[float]] = {"win": [0.0, 0.0], "loss": [0.0, 0.0]}
+    for i in range(n - 1):
+        prev, curr = history[i], history[i + 1]
+        weight = recency_weight(i + 1, n)
+        tallies.setdefault(prev.result, [0.0, 0.0])
+        tallies[prev.result][1] += weight
         if curr.result == "win":
-            tallies[prev.result][0] += 1
+            tallies[prev.result][0] += weight
 
     rates = {key: (w / t if t > 0 else overall) for key, (w, t) in tallies.items()}
     rates[ControlledMarkovChainOrder2.START] = overall
