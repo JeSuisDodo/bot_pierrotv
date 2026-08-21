@@ -1,3 +1,5 @@
+import asyncio
+import io
 from datetime import datetime
 
 import discord
@@ -5,10 +7,12 @@ from discord import app_commands
 from discord.ext import commands
 import aiohttp
 
+import scoreboard_image
 from valorant_api import (
     REGIONS,
     fetch_mmr,
     fetch_matchlist,
+    fetch_image_bytes,
     format_peak_season,
     get_tier_icons,
     compute_player_match_stats,
@@ -53,36 +57,6 @@ def _find_viewer_and_team(match: dict, name: str, tag: str):
     return viewer, team
 
 
-def _format_name_tag(name: str, tag: str, width: int = 24) -> str:
-    """Tronque le pseudo si besoin, mais garde toujours le tag entier lisible."""
-    name = name or "Inconnu"
-    tag_part = f"#{tag or '????'}"
-    max_name_len = max(1, width - len(tag_part))
-    return f"{name[:max_name_len]}{tag_part}"[:width]
-
-
-def _build_team_lines(players: list, rounds_played: int) -> str:
-    """Une ligne compacte par joueur (pas de tableau à largeur fixe : ça casse en
-    colonnes désalignées sur mobile, où l'embed est bien plus étroit que sur desktop).
-    Trié par ACS décroissant, comme un vrai scoreboard."""
-    ranked = sorted(
-        players,
-        key=lambda p: compute_player_match_stats(p, rounds_played)["acs"],
-        reverse=True,
-    )
-    lines = []
-    for p in ranked:
-        name = _format_name_tag(p.get("name"), p.get("tag"))
-        agent = p.get("agent", {}).get("name") or "?"
-        s = compute_player_match_stats(p, rounds_played)
-        lines.append(
-            f"**{name}** · {agent}\n"
-            f"ACS `{s['acs']:.0f}` · {s['kills']}/{s['deaths']}/{s['assists']} · "
-            f"ADR `{s['adr']:.0f}` · HS `{s['hs_percent']:.0f}%`"
-        )
-    return "\n".join(lines)
-
-
 class MatchButton(discord.ui.Button):
     def __init__(self, match: dict, viewer_name: str, viewer_tag: str, region_value: str, *, label: str, style: discord.ButtonStyle):
         super().__init__(label=label, style=style)
@@ -92,10 +66,17 @@ class MatchButton(discord.ui.Button):
         self.region_value = region_value
 
     async def callback(self, interaction: discord.Interaction):
-        embed, view = build_match_embed(self.match, self.viewer_name, self.viewer_tag, self.region_value)
+        try:
+            await interaction.response.defer()
+        except (discord.HTTPException, ConnectionError, OSError):
+            return
+
+        async with aiohttp.ClientSession() as session:
+            file, view = await build_match_scoreboard(session, self.match, self.viewer_name, self.viewer_tag, self.region_value)
+
         view.message = interaction.message
         try:
-            await interaction.response.edit_message(embed=embed, view=view)
+            await interaction.edit_original_response(embed=None, attachments=[file], view=view)
         except (discord.HTTPException, ConnectionError, OSError):
             pass
 
@@ -265,7 +246,35 @@ async def build_profile(session: aiohttp.ClientSession, name: str, tag: str, reg
     return embed, view, None
 
 
-def build_match_embed(match: dict, viewer_name: str, viewer_tag: str, region_value: str):
+async def _fetch_player_rank_icons(session: aiohttp.ClientSession, players: list, region_value: str) -> dict:
+    """Récupère le rang live actuel + peak (et leurs icônes) pour chaque joueur nommé
+    d'un match. Renvoie {(name.lower(), tag.lower()): (current_icon_bytes, peak_icon_bytes)}.
+    Un joueur dont la récupération échoue (compte introuvable, API en erreur...) obtient
+    simplement (None, None) : ça n'empêche pas d'afficher le reste du scoreboard."""
+    icons = await get_tier_icons(session)
+    named_players = [p for p in players if p.get("name") and p.get("tag")]
+
+    async def fetch_one(p: dict):
+        payload = await fetch_mmr(session, p["name"], p["tag"], region_value)
+        data = payload.get("data", {})
+        current_tier_id = data.get("current", {}).get("tier", {}).get("id")
+        peak_tier_id = data.get("peak", {}).get("tier", {}).get("id")
+        current_bytes = await fetch_image_bytes(session, icons.get(current_tier_id))
+        peak_bytes = await fetch_image_bytes(session, icons.get(peak_tier_id))
+        return current_bytes, peak_bytes
+
+    results = await asyncio.gather(*(fetch_one(p) for p in named_players), return_exceptions=True)
+
+    icon_map = {}
+    for p, result in zip(named_players, results):
+        key = (p["name"].lower(), p["tag"].lower())
+        icon_map[key] = (None, None) if isinstance(result, Exception) else result
+    return icon_map
+
+
+async def build_match_scoreboard(session: aiohttp.ClientSession, match: dict, viewer_name: str, viewer_tag: str, region_value: str):
+    """Construit l'image du scoreboard d'un match (avec icônes de rang live + peak par
+    joueur) et sa vue de navigation. Renvoie (discord.File, MatchView)."""
     metadata = match.get("metadata", {})
     map_name = metadata.get("map", {}).get("name", "Carte inconnue")
     queue = metadata.get("queue") or {}
@@ -289,27 +298,56 @@ def build_match_embed(match: dict, viewer_name: str, viewer_tag: str, region_val
 
     score_line = ""
     if len(teams) == 2:
-        score_line = f"**{teams[0].get('rounds', {}).get('won', '?')} : {teams[1].get('rounds', {}).get('won', '?')}**"
+        score_line = f"{teams[0].get('rounds', {}).get('won', '?')} : {teams[1].get('rounds', {}).get('won', '?')}"
 
-    embed = discord.Embed(
-        title=f"🗺️ {map_name} — {mode_name}",
-        description=f"{score_line}\n🕒 {started_at} · ⏱️ {duration}".strip(),
-        color=discord.Color.blurple(),
-    )
+    icon_map = await _fetch_player_rank_icons(session, players, region_value)
 
-    team_icons = {"Red": "🔴", "Blue": "🔵"}
+    team_labels = {"Red": "Équipe Red", "Blue": "Équipe Blue"}
+    team_data_list = []
     for team in teams:
         team_players = [p for p in players if p.get("team_id") == team.get("team_id")]
         if not team_players:
             continue
-        rounds = team.get("rounds", {})
-        icon = team_icons.get(team.get("team_id"), "⚔️")
-        trophy = " 🏆" if team.get("won") else ""
-        header = f"{icon} Équipe {team.get('team_id', '?')} — {rounds.get('won', '?')} manches{trophy}"
-        embed.add_field(name=header, value=_build_team_lines(team_players, rounds_played), inline=False)
 
+        rows = []
+        for p in team_players:
+            s = compute_player_match_stats(p, rounds_played)
+            key = ((p.get("name") or "").lower(), (p.get("tag") or "").lower())
+            current_bytes, peak_bytes = icon_map.get(key, (None, None))
+            rows.append(
+                scoreboard_image.PlayerRow(
+                    name=p.get("name") or "Inconnu",
+                    tag=p.get("tag") or "????",
+                    agent=p.get("agent", {}).get("name") or "?",
+                    kills=s["kills"],
+                    deaths=s["deaths"],
+                    assists=s["assists"],
+                    acs=s["acs"],
+                    adr=s["adr"],
+                    hs_percent=s["hs_percent"],
+                    current_icon_bytes=current_bytes,
+                    peak_icon_bytes=peak_bytes,
+                )
+            )
+
+        team_data_list.append(
+            scoreboard_image.TeamData(
+                label=team_labels.get(team.get("team_id"), f"Équipe {team.get('team_id', '?')}"),
+                won=bool(team.get("won")),
+                rounds_won=team.get("rounds", {}).get("won", 0),
+                team_id=team.get("team_id", ""),
+                players=rows,
+            )
+        )
+
+    title = f"{map_name} — {mode_name}" + (f"   {score_line}" if score_line else "")
+    subtitle = f"{started_at} · {duration}"
+
+    png_bytes = await asyncio.to_thread(scoreboard_image.render_scoreboard, title, subtitle, team_data_list)
+
+    file = discord.File(io.BytesIO(png_bytes), filename="scoreboard.png")
     view = MatchView(players, region_value)
-    return embed, view
+    return file, view
 
 
 class Profile(commands.Cog):

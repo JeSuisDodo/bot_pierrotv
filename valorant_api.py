@@ -59,6 +59,29 @@ def _headers() -> dict:
     return {"Authorization": HENRIKDEV_API_KEY} if HENRIKDEV_API_KEY else {}
 
 
+# Cache mémoire des icônes déjà téléchargées (URL -> bytes PNG). Beaucoup de
+# joueurs d'un même match partagent le même rang, donc le même icône.
+_icon_bytes_cache: dict[str, bytes] = {}
+
+
+async def fetch_image_bytes(session: aiohttp.ClientSession, url: str) -> bytes | None:
+    """Télécharge une image (icône de rang) et la met en cache par URL. Renvoie
+    None en cas d'échec plutôt que de lever une exception (image non bloquante)."""
+    if not url:
+        return None
+    if url in _icon_bytes_cache:
+        return _icon_bytes_cache[url]
+    try:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.read()
+    except Exception:
+        return None
+    _icon_bytes_cache[url] = data
+    return data
+
+
 async def fetch_mmr(session: aiohttp.ClientSession, name: str, tag: str, region: str) -> dict:
     """Appelle v3/mmr (current + peak). Renvoie le payload JSON brut, ou lève une exception
     (aiohttp.ClientResponseError) en cas de statut HTTP d'erreur, à charge de l'appelant."""
