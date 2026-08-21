@@ -196,7 +196,7 @@ class MatchView(discord.ui.View):
 
 
 async def build_profile(session: aiohttp.ClientSession, name: str, tag: str, region_value: str, region_name: str):
-    """Récupère rank + peak + 5 derniers matchs, et construit l'embed/la vue du profil.
+    """Récupère rank + peak + 5 dernières parties classées, et construit l'embed/la vue du profil.
     Renvoie (embed, view, None) en cas de succès, ou (None, None, message_erreur) sinon."""
     try:
         mmr_payload = await fetch_mmr(session, name, tag, region_value)
@@ -240,7 +240,7 @@ async def build_profile(session: aiohttp.ClientSession, name: str, tag: str, reg
 
     view = ProfileView(matches, name, tag, region_value)
     embed.set_footer(
-        text="Clique sur une partie pour voir le scoreboard." if view.children else "Aucun match récent trouvé."
+        text="Clique sur une partie pour voir le scoreboard." if view.children else "Aucune partie classée récente trouvée."
     )
 
     return embed, view, None
@@ -354,7 +354,7 @@ class Profile(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="profil", description="Affiche le profil Valorant complet d'un joueur (rank, peak, derniers matchs)")
+    @app_commands.command(name="profil", description="Affiche le profil Valorant complet d'un joueur (rank, peak, dernières parties classées)")
     @app_commands.describe(
         pseudo="Riot ID complet, format Pseudo#Tag (ex: Dodo#1234)",
         region="Région du compte",

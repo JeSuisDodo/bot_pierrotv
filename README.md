@@ -19,7 +19,7 @@ Bot Discord modulaire (structure en cogs) : modération automatique, système é
 
 - **Modération automatique** : kick + suppression des messages récents (5 dernières minutes) de tout utilisateur postant dans un salon interdit (anti-spam / comptes hackés)
 - **Économie & voitures** : les membres gagnent de l'argent en étant actifs (messages, vocal) et le dépensent pour acheter des voitures à la concession (`/shop`), les revendre entre eux (`/hdv`) ou constituer leur garage (`/garage`)
-- **Valorant** : profil complet d'un joueur avec navigation façon tracker (`/profil`) — rank, peak rank, 5 derniers matchs cliquables et leur scoreboard, avec possibilité de sauter au profil de n'importe quel joueur d'une partie —, seuil RR pour être Radiant (`/radiant`), et graphique de progression du MMR basé sur une chaîne de Markov (`/mmr`)
+- **Valorant** : profil complet d'un joueur avec navigation façon tracker (`/profil`) — rank, peak rank, 5 dernières parties classées cliquables et leur scoreboard (rang actuel + peak par joueur, en image), avec possibilité de sauter au profil de n'importe quel joueur d'une partie —, seuil RR pour être Radiant (`/radiant`), et graphique de progression du MMR basé sur une chaîne de Markov (`/mmr`)
 - **Slash commands d'infos** (`/`) avec embeds pour le setup gaming (crosshair, souris, clavier, sensibilité...)
 - **Notifications automatiques** : annonce dans des salons dédiés lors d'une nouvelle vidéo YouTube, d'un nouveau TikTok, ou d'un lancement de stream Twitch
 - Serveur Flask intégré pour rester actif 24/7 sur Render (via ping UptimeRobot)
@@ -104,7 +104,7 @@ Automatique, pas de slash command : voir `FORBIDDEN_CHANNEL_ID` et `PURGE_MINUTE
 ### 🎯 Valorant
 | Commande | Description |
 |---|---|
-| `/profil <pseudo> <région>` | Profil complet d'un joueur : rank actuel, peak rank, et 5 derniers matchs cliquables (scoreboard, puis navigation vers le profil des autres joueurs de la partie) (`cogs/profile.py`) |
+| `/profil <pseudo> <région>` | Profil complet d'un joueur : rank actuel, peak rank, et 5 dernières parties classées cliquables (scoreboard image avec rang par joueur, puis navigation vers le profil des autres joueurs de la partie) (`cogs/profile.py`) |
 | `/radiant <région>` | Seuil RR actuel pour être Radiant dans une région (`cogs/valorant.py`) |
 | `/mmr <pseudo> <région>` | Graphique de progression du MMR, modélisé par une chaîne de Markov d'ordre 2 (`cogs/mmr_markov.py`) — limité à **1 utilisation par semaine et par membre** |
 

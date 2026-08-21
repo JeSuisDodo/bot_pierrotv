@@ -100,7 +100,7 @@ class Info(commands.Cog):
             name="🎯 Valorant",
             value=(
                 "`/profil <pseudo> <région>` — Profil complet d'un joueur : rank, peak rank, "
-                "et 5 derniers matchs cliquables (scoreboard, puis profil des autres joueurs)\n"
+                "et 5 dernières parties classées cliquables (scoreboard, puis profil des autres joueurs)\n"
                 "`/radiant <région>` — Seuil RR actuel pour être Radiant dans une région\n"
                 "`/mmr <pseudo> <région>` — Graphique de progression du MMR (1 utilisation/semaine)"
             ),

@@ -91,11 +91,17 @@ async def fetch_mmr(session: aiohttp.ClientSession, name: str, tag: str, region:
         return await resp.json()
 
 
-async def fetch_matchlist(session: aiohttp.ClientSession, name: str, tag: str, region: str, size: int = 5) -> list:
+async def fetch_matchlist(
+    session: aiohttp.ClientSession, name: str, tag: str, region: str, size: int = 5, mode: str | None = "competitive"
+) -> list:
     """Appelle v4/matches (matchlist enrichie : chaque match contient déjà les stats complètes
     de tous les joueurs, pas besoin d'appeler l'endpoint match détaillé). Filtre les matchs
-    non terminés. Renvoie une liste vide si l'appel échoue (compte neuf, région invalide, etc.)."""
+    non terminés. `mode` filtre par mode de jeu côté API (ex: "competitive" pour les parties
+    classées) ; passer None pour ne pas filtrer. Renvoie une liste vide si l'appel échoue
+    (compte neuf, région invalide, etc.)."""
     url = f"https://api.henrikdev.xyz/valorant/v4/matches/{region}/pc/{name}/{tag}?size={size}"
+    if mode:
+        url += f"&mode={mode}"
     try:
         async with session.get(url, headers=_headers()) as resp:
             if resp.status != 200:
