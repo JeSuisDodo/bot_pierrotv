@@ -271,25 +271,71 @@ def _filter_valid_elo(points: list[MatchPoint]) -> list[MatchPoint]:
 
 SEASON_START_SKIP = 15
 
+# Une seule partie classée ne peut pas faire perdre autant de RR d'un coup (le max
+# réel tourne autour de 30-50). Une chute d'un seul point à l'autre au-delà de ce
+# seuil est donc presque toujours un reset (saison/acte, action admin...), même
+# quand le champ "season" de l'API ne change pas ou n'est pas renseigné à cet
+# endroit précis de l'historique.
+RESET_ELO_DROP_THRESHOLD = 150
+
+# Borne haute : un reset important (ex: chute de 500-700 elo) peut prendre bien
+# plus que SEASON_START_SKIP matchs à remonter. On prolonge la fenêtre de filtrage
+# tant que le rang n'a pas retrouvé son niveau d'avant reset, mais jamais au-delà
+# de cette borne (pour ne pas exclure indéfiniment un vrai derank qui ne remonte
+# pas, qui n'a rien à voir avec un reset de saison). Un très gros reset peut ne
+# pas être totalement comblé même à cette borne (un écart résiduel restera
+# visible) : c'est un compromis assumé plutôt que de risquer d'exclure la moitié
+# de l'historique pour un vrai derank qui ne remonte jamais.
+MAX_RESET_RECOVERY_SKIP = 100
+
 
 def _filter_season_starts(points: list[MatchPoint], skip: int = SEASON_START_SKIP) -> list[MatchPoint]:
-    """Retire les `skip` premiers matchs de chaque nouvelle saison détectée dans
-    l'historique (y compris la toute première saison visible dans les données
-    récupérées). Un début de saison/acte remet souvent le joueur à un rang très
-    différent de son vrai niveau (matchs de placement, RR encore instable), ce qui
-    crée des chutes/remontées brutales qui polluent aussi bien le graphique (chute
-    suivie d'un pic annoté comme si c'était un vrai extremum de performance) que
-    l'apprentissage du modèle. `points` doit déjà être trié chronologiquement."""
+    """Retire les matchs qui suivent chaque reset détecté dans l'historique (y
+    compris au tout début des données récupérées). Un début de saison/acte remet
+    souvent le joueur à un rang très différent de son vrai niveau (matchs de
+    placement, RR encore instable), ce qui crée des chutes/remontées brutales qui
+    polluent aussi bien le graphique (chute suivie d'un pic annoté comme si
+    c'était un vrai extremum de performance) que l'apprentissage du modèle.
+
+    Deux signaux indépendants déclenchent le filtre, pour rester robuste même si
+    l'un des deux est absent ou peu fiable sur une portion de l'historique : un
+    changement de la valeur `season`, OU une chute d'elo d'un match à l'autre trop
+    grosse pour être un résultat de partie normal (voir RESET_ELO_DROP_THRESHOLD).
+
+    La fenêtre exclue dure au moins `skip` matchs, mais se prolonge tant que l'elo
+    n'a pas retrouvé son niveau d'avant reset (jusqu'à MAX_RESET_RECOVERY_SKIP) :
+    un reset de 500+ elo ne se rattrape pas toujours en 15 matchs, et s'arrêter
+    trop tôt laissait passer une bonne partie de la remontée artificielle.
+
+    `points` doit déjà être trié chronologiquement."""
     filtered: list[MatchPoint] = []
-    current_season = object()  # sentinel : garantit que le tout premier point déclenche un skip
-    skip_remaining = 0
+    current_season = object()  # sentinel : garantit que le tout premier point déclenche un reset
+    previous_elo: Optional[int] = None
+    in_reset = False
+    reset_reference_elo: Optional[int] = None  # niveau à retrouver pour sortir de la fenêtre
+    reset_match_count = 0
+
     for point in points:
-        if point.season != current_season:
+        season_changed = point.season != current_season
+        abrupt_drop = previous_elo is not None and (previous_elo - point.elo) > RESET_ELO_DROP_THRESHOLD
+        if season_changed or abrupt_drop:
             current_season = point.season
-            skip_remaining = skip
-        if skip_remaining > 0:
-            skip_remaining -= 1
-            continue
+            in_reset = True
+            reset_reference_elo = previous_elo
+            reset_match_count = 0
+
+        previous_elo = point.elo
+
+        if in_reset:
+            reset_match_count += 1
+            not_recovered = (
+                reset_reference_elo is not None
+                and point.elo < reset_reference_elo - RESET_ELO_DROP_THRESHOLD
+            )
+            if reset_match_count <= MAX_RESET_RECOVERY_SKIP and (reset_match_count <= skip or not_recovered):
+                continue
+            in_reset = False
+
         filtered.append(point)
     return filtered
 
