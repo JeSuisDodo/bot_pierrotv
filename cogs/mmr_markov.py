@@ -851,6 +851,13 @@ def build_mmr_graph(name: str, tag: str, region: str) -> tuple[io.BytesIO, int]:
     local_rates = local_conditional_win_rates(history)
     sims = simulate_order2(chain, start_state, len(history) - 1, local_rates, n_runs=1000)
 
+    # La simulation rejoue la MÊME période que l'historique réel (pas une projection
+    # dans le futur) : elle ne doit donc jamais dépasser le vrai peak atteint sur
+    # cette période, ni descendre sous le vrai plancher — on n'a aucune preuve que
+    # le joueur aurait pu faire mieux ou pire que ce qui s'est réellement produit.
+    real_elos = [m.elo for m in history]
+    sims = np.clip(sims, min(real_elos), max(real_elos))
+
     image = plot_comparison(history, sims, name, tag, radiant_threshold_rr)
     return image, radiant_threshold_rr
 
