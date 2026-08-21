@@ -53,7 +53,7 @@ def _find_viewer_and_team(match: dict, name: str, tag: str):
     return viewer, team
 
 
-def _format_name_tag(name: str, tag: str, width: int = 20) -> str:
+def _format_name_tag(name: str, tag: str, width: int = 24) -> str:
     """Tronque le pseudo si besoin, mais garde toujours le tag entier lisible."""
     name = name or "Inconnu"
     tag_part = f"#{tag or '????'}"
@@ -61,16 +61,24 @@ def _format_name_tag(name: str, tag: str, width: int = 20) -> str:
     return f"{name[:max_name_len]}{tag_part}"[:width]
 
 
-def _build_team_table(players: list, rounds_played: int) -> str:
-    header = f"{'Joueur':<20}{'Agent':<10}{'ACS':>5}{'K':>4}{'D':>4}{'A':>4}{'ADR':>6}{'HS%':>6}"
-    lines = [header]
-    for p in players:
+def _build_team_lines(players: list, rounds_played: int) -> str:
+    """Une ligne compacte par joueur (pas de tableau à largeur fixe : ça casse en
+    colonnes désalignées sur mobile, où l'embed est bien plus étroit que sur desktop).
+    Trié par ACS décroissant, comme un vrai scoreboard."""
+    ranked = sorted(
+        players,
+        key=lambda p: compute_player_match_stats(p, rounds_played)["acs"],
+        reverse=True,
+    )
+    lines = []
+    for p in ranked:
         name = _format_name_tag(p.get("name"), p.get("tag"))
-        agent = (p.get("agent", {}).get("name") or "?")[:9]
+        agent = p.get("agent", {}).get("name") or "?"
         s = compute_player_match_stats(p, rounds_played)
         lines.append(
-            f"{name:<20}{agent:<10}{s['acs']:>5.0f}{s['kills']:>4}{s['deaths']:>4}{s['assists']:>4}"
-            f"{s['adr']:>6.0f}{s['hs_percent']:>5.0f}%"
+            f"**{name}** · {agent}\n"
+            f"ACS `{s['acs']:.0f}` · {s['kills']}/{s['deaths']}/{s['assists']} · "
+            f"ADR `{s['adr']:.0f}` · HS `{s['hs_percent']:.0f}%`"
         )
     return "\n".join(lines)
 
@@ -289,15 +297,16 @@ def build_match_embed(match: dict, viewer_name: str, viewer_tag: str, region_val
         color=discord.Color.blurple(),
     )
 
+    team_icons = {"Red": "🔴", "Blue": "🔵"}
     for team in teams:
         team_players = [p for p in players if p.get("team_id") == team.get("team_id")]
         if not team_players:
             continue
         rounds = team.get("rounds", {})
-        trophy = "🏆 " if team.get("won") else ""
-        header = f"{trophy}Équipe {team.get('team_id', '?')} — {rounds.get('won', '?')} manches"
-        table = _build_team_table(team_players, rounds_played)
-        embed.add_field(name=header, value=f"```{table}```", inline=False)
+        icon = team_icons.get(team.get("team_id"), "⚔️")
+        trophy = " 🏆" if team.get("won") else ""
+        header = f"{icon} Équipe {team.get('team_id', '?')} — {rounds.get('won', '?')} manches{trophy}"
+        embed.add_field(name=header, value=_build_team_lines(team_players, rounds_played), inline=False)
 
     view = MatchView(players, region_value)
     return embed, view
