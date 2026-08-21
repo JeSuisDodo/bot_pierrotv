@@ -739,6 +739,20 @@ def build_mmr_graph(name: str, tag: str, region: str) -> tuple[io.BytesIO, int]:
 # 3. Cog Discord
 # --------------------------------------------------------------------------- #
 
+def _mmr_cooldown_key(interaction: discord.Interaction):
+    """discord.py n'applique un cooldown qu'aux appels qui partagent la même clé.
+    Pour les administrateurs (permission Gérer le serveur), on renvoie l'ID de
+    l'interaction elle-même : unique à chaque appel, donc jamais réutilisée, donc
+    jamais de cooldown déclenché (utilisations illimitées). Attention : renvoyer
+    None ici NE marche PAS pour exempter du cooldown — discord.py mettrait alors
+    tous les admins dans un seul bucket partagé (le premier admin qui joue la
+    commande bloquerait tous les autres). Les membres non-admins gardent une clé
+    stable (leur ID), donc restent bien limités à 1 utilisation/semaine."""
+    if interaction.user.guild_permissions.manage_guild:
+        return interaction.id
+    return interaction.user.id
+
+
 class MMRMarkov(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -758,7 +772,7 @@ class MMRMarkov(commands.Cog):
         region="Région du compte",
     )
     @app_commands.choices(region=REGIONS)
-    @app_commands.checks.cooldown(1, 604800.0, key=lambda i: i.user.id)  # 1 utilisation / semaine / utilisateur
+    @app_commands.checks.cooldown(1, 604800.0, key=_mmr_cooldown_key)  # 1x/semaine, sauf admins
     async def mmr(self, interaction: discord.Interaction, pseudo: str, region: app_commands.Choice[str]):
         if "#" not in pseudo:
             await interaction.response.send_message(
