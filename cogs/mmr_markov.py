@@ -612,52 +612,63 @@ class ControlledMarkovChainOrder2:
         return int(rng.choice(outcomes, p=probs))
 
 
-def win_rate(history: list[MatchPoint]) -> float:
-    """Taux de victoire pondéré par récence (voir recency_weight) : reflète la
-    forme récente du joueur plutôt qu'une moyenne plate sur tout l'historique."""
-    if not history:
-        return 0.5
+ROLLING_WIN_RATE_WINDOW = 40
+
+
+def local_conditional_win_rates(history: list[MatchPoint], window: int = ROLLING_WIN_RATE_WINDOW) -> list[dict[str, float]]:
+    """Taux de victoire conditionnels (après victoire / après défaite / au départ)
+    calculés sur une fenêtre glissante centrée sur chaque position de l'historique,
+    plutôt qu'un seul chiffre global pondéré par récence.
+
+    Un seul chiffre "récence" appliqué à toute la longueur simulée plaque la forme
+    du moment présent sur l'ensemble de la trajectoire rejouée : un joueur qui
+    vient de rentrer en forme voyait sa courbe simulée grimper dès le tout premier
+    match rejoué, pas seulement à partir du moment où sa vraie forme s'est
+    améliorée — ce qui faisait dériver la simulation largement au-dessus de la
+    réalité sur un historique long. Cette version renvoie un taux par position :
+    chaque étape simulée reflète le climat réel de la période correspondante."""
     n = len(history)
-    weighted_wins = sum(recency_weight(i, n) for i, m in enumerate(history) if m.result == "win")
-    total_weight = sum(recency_weight(i, n) for i in range(n))
-    return weighted_wins / total_weight if total_weight else 0.5
+    local_rates: list[dict[str, float]] = []
+    for i in range(n):
+        lo = max(0, i - window)
+        hi = min(n, i + window + 1)
+        segment = history[lo:hi]
+        overall = sum(1 for m in segment if m.result == "win") / len(segment) if segment else 0.5
 
+        tallies: dict[str, list[int]] = {"win": [0, 0], "loss": [0, 0]}
+        for j in range(len(segment) - 1):
+            prev, curr = segment[j], segment[j + 1]
+            tallies.setdefault(prev.result, [0, 0])
+            tallies[prev.result][1] += 1
+            if curr.result == "win":
+                tallies[prev.result][0] += 1
 
-def conditional_win_rates(history: list[MatchPoint]) -> dict[str, float]:
-    overall = win_rate(history)
-    n = len(history)
-    tallies: dict[str, list[float]] = {"win": [0.0, 0.0], "loss": [0.0, 0.0]}
-    for i in range(n - 1):
-        prev, curr = history[i], history[i + 1]
-        weight = recency_weight(i + 1, n)
-        tallies.setdefault(prev.result, [0.0, 0.0])
-        tallies[prev.result][1] += weight
-        if curr.result == "win":
-            tallies[prev.result][0] += weight
-
-    rates = {key: (w / t if t > 0 else overall) for key, (w, t) in tallies.items()}
-    rates[ControlledMarkovChainOrder2.START] = overall
-    return rates
+        rates = {key: (w / t if t > 0 else overall) for key, (w, t) in tallies.items()}
+        rates[ControlledMarkovChainOrder2.START] = overall
+        local_rates.append(rates)
+    return local_rates
 
 
 def simulate_order2(
     chain: ControlledMarkovChainOrder2,
     start_state: int,
     n_steps: int,
-    cond_win_rates: dict[str, float],
+    local_win_rates: list[dict[str, float]],
     n_runs: int = 1000,
     seed: int = 0,
 ) -> np.ndarray:
     rng = np.random.default_rng(seed)
     trajectories = np.zeros((n_runs, n_steps + 1), dtype=int)
     trajectories[:, 0] = start_state
-    default_p_win = cond_win_rates.get(ControlledMarkovChainOrder2.START, 0.5)
+    last_index = len(local_win_rates) - 1
 
     for run in range(n_runs):
         state = start_state
         prev_result = ControlledMarkovChainOrder2.START
         for t in range(1, n_steps + 1):
-            p_win = cond_win_rates.get(prev_result, default_p_win)
+            rates = local_win_rates[min(t, last_index)]
+            default_p_win = rates.get(ControlledMarkovChainOrder2.START, 0.5)
+            p_win = rates.get(prev_result, default_p_win)
             result = "win" if rng.random() < p_win else "loss"
             aug_state = (state, prev_result)
             state = chain.sample_next_state(result, aug_state, rng)
@@ -837,8 +848,8 @@ def build_mmr_graph(name: str, tag: str, region: str) -> tuple[io.BytesIO, int]:
     start_state = to_state(history[0].elo, cfg.state_width)
     chain = ControlledMarkovChainOrder2(width=cfg.state_width)
     chain.fit(adjusted_history)
-    cond_rates = conditional_win_rates(history)
-    sims = simulate_order2(chain, start_state, len(history) - 1, cond_rates, n_runs=1000)
+    local_rates = local_conditional_win_rates(history)
+    sims = simulate_order2(chain, start_state, len(history) - 1, local_rates, n_runs=1000)
 
     image = plot_comparison(history, sims, name, tag, radiant_threshold_rr)
     return image, radiant_threshold_rr
