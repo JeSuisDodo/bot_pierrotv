@@ -232,6 +232,7 @@ class MatchPoint:
     elo: int
     rr_delta: int
     result: str  # "win" ou "loss"
+    match_id: Optional[str] = None
 
 
 @dataclass
@@ -254,7 +255,8 @@ def _parse_entries(entries: list[dict]) -> list[MatchPoint]:
         if elo is None:
             continue
         result = "win" if delta >= 0 else "loss"
-        points.append(MatchPoint(date=date, elo=elo, rr_delta=delta, result=result))
+        match_id = entry.get("match_id")
+        points.append(MatchPoint(date=date, elo=elo, rr_delta=delta, result=result, match_id=match_id))
     points.reverse()
     return _filter_valid_elo(points)
 
@@ -269,6 +271,94 @@ def _get(url: str, api_key: str) -> dict:
     resp = requests.get(url, headers={"Authorization": api_key}, timeout=15)
     resp.raise_for_status()
     return resp.json()
+
+
+# --------------------------------------------------------------------------- #
+# 1bis. Ajustement à la force du lobby (échantillonné)
+# --------------------------------------------------------------------------- #
+#
+# L'historique elo (mmr-history) ne contient que le MMR du joueur, pas la
+# composition des parties. Pour savoir si un match a été joué contre un lobby
+# plus fort ou plus faible que le joueur, il faut récupérer le détail complet
+# de CE match (v4/match/{region}/{match_id}) — un appel API par match. Comme
+# l'historique peut contenir jusqu'à 300 matchs, on n'échantillonne qu'une
+# vingtaine de points répartis sur toute la période plutôt que de tout
+# récupérer.
+
+def tier_id_to_approx_elo(tier_id: int) -> float:
+    """Convertit un tier.id (échelle Riot/HenrikDev : 3=Fer 1 ... 26=Immortel 3,
+    27=Radiant) en valeur elo approximative sur notre échelle interne (milieu du
+    palier de 100, faute de connaître le RR exact de l'adversaire à cet instant)."""
+    bucket_index = tier_id - 3
+    if bucket_index < 0:
+        return 50.0
+    return bucket_index * 100 + 50
+
+
+def average_lobby_elo(players: list[dict], exclude_name: str, exclude_tag: str) -> Optional[float]:
+    """Elo moyen approximatif des 9 autres joueurs d'un match (équipe + adversaires),
+    en excluant le joueur recherché. None si aucun rang exploitable n'est trouvé."""
+    tiers = [
+        p.get("tier", {}).get("id")
+        for p in players
+        if not (
+            (p.get("name") or "").lower() == exclude_name.lower()
+            and (p.get("tag") or "").lower() == exclude_tag.lower()
+        )
+    ]
+    tiers = [t for t in tiers if t is not None]
+    if not tiers:
+        return None
+    return sum(tier_id_to_approx_elo(t) for t in tiers) / len(tiers)
+
+
+def fetch_match_detail(cfg: Config, match_id: str) -> dict:
+    url = f"https://api.henrikdev.xyz/valorant/v4/match/{cfg.region}/{match_id}"
+    return _get(url, cfg.api_key)
+
+
+def compute_lobby_adjustment(
+    history: list[MatchPoint], cfg: Config, n_samples: int = 20, damping: float = 0.3
+) -> np.ndarray:
+    """Échantillonne ~n_samples matchs répartis sur l'historique, récupère leur
+    composition complète, et calcule un ajustement d'elo (positif si le lobby
+    était plus fort que le joueur à ce moment-là, négatif sinon) interpolé sur
+    tout l'historique. Renvoie un tableau de deltas, un par point de `history`
+    (tout à 0.0 si aucun échantillon n'a pu être récupéré).
+
+    Heuristique, pas un calcul validé statistiquement : `damping` limite l'ampleur
+    de l'ajustement (30% de l'écart de force du lobby par défaut) pour qu'un seul
+    match échantillonné ne fasse pas dévier la courbe simulée de façon disproportionnée."""
+    candidate_indices = [i for i, m in enumerate(history) if m.match_id]
+    if not candidate_indices:
+        return np.zeros(len(history))
+
+    step = max(1, len(candidate_indices) // n_samples)
+    sample_indices = candidate_indices[::step][:n_samples]
+
+    sample_points: list[tuple[int, float]] = []
+    for i in sample_indices:
+        point = history[i]
+        try:
+            match_data = fetch_match_detail(cfg, point.match_id)
+        except Exception:
+            continue
+
+        players = match_data.get("data", {}).get("players", [])
+        lobby_elo = average_lobby_elo(players, cfg.name, cfg.tag)
+        if lobby_elo is None:
+            continue
+
+        diff = lobby_elo - point.elo
+        sample_points.append((i, diff * damping))
+        time.sleep(0.2)  # anti-rate-limit, même esprit que fetch_stored_history_paginated
+
+    if not sample_points:
+        return np.zeros(len(history))
+
+    xs = [p[0] for p in sample_points]
+    ys = [p[1] for p in sample_points]
+    return np.interp(np.arange(len(history)), xs, ys)
 
 
 def fetch_mmr_history(cfg: Config, min_matches: int = 10, max_matches: Optional[int] = 300) -> list[MatchPoint]:
@@ -511,7 +601,7 @@ def plot_comparison(
         )
     x_sim = range(len(mean_sim))
     ax.plot(
-        x_sim, mean_sim, label="Chaîne de Markov ordre 2 (moyenne simulée)",
+        x_sim, mean_sim, label="Chaîne de Markov ordre 2, ajustée à la force du lobby (moyenne simulée)",
         color=COLOR_SIM, linewidth=1.6, solid_capstyle="round",
     )
     ax.fill_between(
@@ -618,9 +708,26 @@ def build_mmr_graph(name: str, tag: str, region: str) -> tuple[io.BytesIO, int]:
     radiant_threshold_rr = fetch_radiant_threshold_rr(region)
 
     cfg.state_width = adaptive_state_width(len(history))
+
+    # Échantillonne ~20 matchs pour ajuster le modèle à la force réelle du lobby
+    # (voir compute_lobby_adjustment). La courbe "réelle" tracée plus bas reste
+    # basée sur l'historique brut, non ajusté : seule la chaîne apprend sur les
+    # valeurs recalibrées, pour que la simulation reflète la difficulté rencontrée.
+    lobby_adjustment = compute_lobby_adjustment(history, cfg, n_samples=20)
+    adjusted_history = [
+        MatchPoint(
+            date=m.date,
+            elo=max(0, int(round(m.elo + lobby_adjustment[i]))),
+            rr_delta=m.rr_delta,
+            result=m.result,
+            match_id=m.match_id,
+        )
+        for i, m in enumerate(history)
+    ]
+
     start_state = to_state(history[0].elo, cfg.state_width)
     chain = ControlledMarkovChainOrder2(width=cfg.state_width)
-    chain.fit(history)
+    chain.fit(adjusted_history)
     cond_rates = conditional_win_rates(history)
     sims = simulate_order2(chain, start_state, len(history) - 1, cond_rates, n_runs=1000)
 
