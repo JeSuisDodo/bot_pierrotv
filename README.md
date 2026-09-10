@@ -22,7 +22,7 @@ Bot Discord modulaire (structure en cogs) : modération automatique, système é
 - **Valorant** : profil complet d'un joueur avec navigation façon tracker (`/profil`) — rank, peak rank, 5 dernières parties classées cliquables et leur scoreboard (rang actuel + peak par joueur, en image), avec possibilité de sauter au profil de n'importe quel joueur d'une partie —, seuil RR pour être Radiant (`/radiant`), et graphique de progression du MMR basé sur une chaîne de Markov (`/mmr`)
 - **Slash commands d'infos** (`/`) avec embeds pour le setup gaming (crosshair, souris, clavier, sensibilité...)
 - **Notifications automatiques** : annonce dans des salons dédiés lors d'une nouvelle vidéo YouTube, d'un nouveau TikTok, ou d'un lancement de stream Twitch
-- **Giveaways** : un modérateur lance un giveaway (`/giveaway`) dans le salon dédié, les membres participent en tapant `!giveway` (message supprimé + confirmation en DM, une seule participation par giveaway), tirage automatique des gagnants à l'expiration du délai
+- **Giveaways** : un modérateur lance un giveaway (`/giveaway`) dans le salon dédié, les membres participent en tapant `!giveaway` (message supprimé + confirmation en DM, une seule participation par giveaway), tirage automatique des gagnants à l'expiration du délai
 - Serveur Flask intégré pour rester actif 24/7 sur Render (via ping UptimeRobot)
 
 ## Structure du projet
@@ -137,7 +137,7 @@ Réservées à `manage_guild` ou au rôle défini par `MOD_ROLE_ID` dans `cogs/a
 | `/giveaway <composant> <durée> [gagnants]` | Lance un giveaway dans le salon dédié (réservé aux modérateurs). Durée au format `1j`, `12h`, `30m`, combinable (`1j12h`) |
 | `/giveaway_end` | Termine immédiatement le giveaway en cours et tire les gagnants (réservé aux modérateurs) |
 
-Pour participer, n'importe quel membre tape `!giveway` dans le salon de giveaway (`GIVEAWAY_CHANNEL_ID` dans `cogs/giveaway.py`) : le message est supprimé et un DM confirme (ou refuse, en cas de double participation) l'inscription. Une seule entrée par membre et par giveaway (stockée en base). À l'expiration du délai, le(s) gagnant(s) sont tirés au sort automatiquement, annoncés dans le salon et prévenus en DM.
+Pour participer, n'importe quel membre tape `!giveaway` dans le salon de giveaway (`GIVEAWAY_CHANNEL_ID` dans `cogs/giveaway.py`) : le message est supprimé et un DM confirme (ou refuse, en cas de double participation) l'inscription. Une seule entrée par membre et par giveaway (stockée en base). À l'expiration du délai, le(s) gagnant(s) sont tirés au sort automatiquement, annoncés dans le salon et prévenus en DM.
 
 ## Système économie & voitures
 

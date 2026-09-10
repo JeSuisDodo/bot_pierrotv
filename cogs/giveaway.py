@@ -10,9 +10,9 @@ from discord.ext import commands, tasks
 
 import db
 
-# Seul salon où les entrées "!giveway" sont acceptées
+# Seul salon où les entrées "!giveaway" sont acceptées
 GIVEAWAY_CHANNEL_ID = 1547704236001726505
-ENTRY_KEYWORD = "!giveway"
+ENTRY_KEYWORD = "!giveaway"
 
 # ID du rôle modérateur autorisé (même logique que cogs/admin_economy.py)
 MOD_ROLE_ID = None
