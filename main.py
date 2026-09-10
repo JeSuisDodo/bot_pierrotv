@@ -58,7 +58,8 @@ EXTENSIONS = [
     "cogs.valorant",
     "cogs.profile",
     "cogs.guide",
-    "cogs.mmr_markov"
+    "cogs.mmr_markov",
+    "cogs.giveaway"
 ]
  
 GUILD_ID = discord.Object(id=834429780916830280)  # ton ID de serveur, comme avant

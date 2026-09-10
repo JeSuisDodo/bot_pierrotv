@@ -140,3 +140,60 @@ def get_listing_by_short_id(short_id: str) -> dict:
 def remove_listing(listing_id) -> None:
     collection = get_market()
     collection.delete_one({"_id": listing_id})
+
+
+# ---------- GIVEAWAYS ----------
+def get_giveaways():
+    db = get_db()
+    return db["giveaways"]
+
+
+def create_giveaway(prize: str, winner_count: int, channel_id: int, created_by: int, ends_at) -> str:
+    """Crée un giveaway et renvoie son _id (ObjectId)"""
+    collection = get_giveaways()
+    result = collection.insert_one(
+        {
+            "prize": prize,
+            "winner_count": winner_count,
+            "channel_id": channel_id,
+            "message_id": None,
+            "created_by": created_by,
+            "ends_at": ends_at,
+            "participants": [],
+            "ended": False,
+            "winners": [],
+        }
+    )
+    return result.inserted_id
+
+
+def set_giveaway_message(giveaway_id, message_id: int) -> None:
+    collection = get_giveaways()
+    collection.update_one({"_id": giveaway_id}, {"$set": {"message_id": message_id}})
+
+
+def get_active_giveaway(channel_id: int) -> dict:
+    """Renvoie le giveaway en cours pour ce salon, ou None s'il n'y en a pas"""
+    collection = get_giveaways()
+    return collection.find_one({"channel_id": channel_id, "ended": False})
+
+
+def get_expired_giveaways(now) -> list:
+    collection = get_giveaways()
+    return list(collection.find({"ended": False, "ends_at": {"$lte": now}}))
+
+
+def add_giveaway_participant(giveaway_id, user_id: int) -> bool:
+    """Ajoute un participant s'il n'est pas déjà inscrit (opération atomique, pas de
+    doublon possible). Renvoie False s'il participait déjà à ce giveaway."""
+    collection = get_giveaways()
+    result = collection.update_one(
+        {"_id": giveaway_id, "participants": {"$ne": user_id}},
+        {"$push": {"participants": user_id}},
+    )
+    return result.modified_count > 0
+
+
+def end_giveaway(giveaway_id, winners: list) -> None:
+    collection = get_giveaways()
+    collection.update_one({"_id": giveaway_id}, {"$set": {"ended": True, "winners": winners}})

@@ -22,6 +22,7 @@ Bot Discord modulaire (structure en cogs) : modération automatique, système é
 - **Valorant** : profil complet d'un joueur avec navigation façon tracker (`/profil`) — rank, peak rank, 5 dernières parties classées cliquables et leur scoreboard (rang actuel + peak par joueur, en image), avec possibilité de sauter au profil de n'importe quel joueur d'une partie —, seuil RR pour être Radiant (`/radiant`), et graphique de progression du MMR basé sur une chaîne de Markov (`/mmr`)
 - **Slash commands d'infos** (`/`) avec embeds pour le setup gaming (crosshair, souris, clavier, sensibilité...)
 - **Notifications automatiques** : annonce dans des salons dédiés lors d'une nouvelle vidéo YouTube, d'un nouveau TikTok, ou d'un lancement de stream Twitch
+- **Giveaways** : un modérateur lance un giveaway (`/giveaway`) dans le salon dédié, les membres participent en tapant `!giveway` (message supprimé + confirmation en DM, une seule participation par giveaway), tirage automatique des gagnants à l'expiration du délai
 - Serveur Flask intégré pour rester actif 24/7 sur Render (via ping UptimeRobot)
 
 ## Structure du projet
@@ -49,7 +50,8 @@ bot/
     ├── guide.py                 # /guide — explique le système économie/voitures
     ├── valorant.py              # /radiant
     ├── profile.py                # /profil — profil, matchs récents et scoreboards navigables
-    └── mmr_markov.py            # /mmr — graphique de progression MMR (chaîne de Markov)
+    ├── mmr_markov.py            # /mmr — graphique de progression MMR (chaîne de Markov)
+    └── giveaway.py               # /giveaway, /giveaway_end — giveaways avec entrée par message
 ```
 
 ## Installation
@@ -71,8 +73,8 @@ bot/
 | Variable | Requis pour | Description |
 |---|---|---|
 | `TOKEN` | Bot (toujours) | Token du bot Discord (Developer Portal → Bot → Token) |
-| `DBSTRING` | Économie/voitures | Chaîne de connexion MongoDB Atlas (`cogs/economy.py`, `shop.py`, `market.py`, `admin_economy.py` en dépendent via `db.py`) |
-| `HENRIKDEV_API_KEY` | Valorant | Clé API [HenrikDev](https://docs.henrikdev.xyz/) pour `/rank`, `/radiant` et `/mmr` |
+| `DBSTRING` | Économie/voitures, giveaways | Chaîne de connexion MongoDB Atlas (`cogs/economy.py`, `shop.py`, `market.py`, `admin_economy.py`, `giveaway.py` en dépendent via `db.py`) |
+| `HENRIKDEV_API_KEY` | Valorant | Clé API [HenrikDev](https://docs.henrikdev.xyz/) pour `/profil`, `/radiant` et `/mmr` |
 | `TWITCH_CLIENT_ID` | Notifications Twitch | Client ID d'une application Twitch |
 | `TWITCH_CLIENT_SECRET` | Notifications Twitch | Client secret de cette application |
 
@@ -80,7 +82,7 @@ Récupérer un ID Discord (salon/serveur) : activer le **mode développeur** (Di
 
 Créer les identifiants Twitch : https://dev.twitch.tv/console/apps
 
-> ⚠️ Sans `DBSTRING`, les cogs `economy`, `shop`, `market` et `admin_economy` planteront au chargement (erreur affichée dans les logs au démarrage, le bot continue de tourner avec les autres cogs). Sans `HENRIKDEV_API_KEY`, `/profil` et `/mmr` échoueront et `/radiant` retombera sur le seuil plancher (300 RR).
+> ⚠️ Sans `DBSTRING`, les cogs `economy`, `shop`, `market`, `admin_economy` et `giveaway` planteront au chargement (erreur affichée dans les logs au démarrage, le bot continue de tourner avec les autres cogs). Sans `HENRIKDEV_API_KEY`, `/profil` et `/mmr` échoueront et `/radiant` retombera sur le seuil plancher (300 RR).
 
 ## Commandes disponibles
 
@@ -128,6 +130,14 @@ Automatique, pas de slash command : voir `FORBIDDEN_CHANNEL_ID` et `PURGE_MINUTE
 | `/delete <membre> <voiture>` | Supprime une voiture de l'inventaire d'un membre |
 
 Réservées à `manage_guild` ou au rôle défini par `MOD_ROLE_ID` dans `cogs/admin_economy.py`.
+
+### 🎉 Giveaways (modérateur pour le lancement, `cogs/giveaway.py`)
+| Commande | Description |
+|---|---|
+| `/giveaway <prix> <durée> [gagnants]` | Lance un giveaway dans le salon dédié (réservé aux modérateurs). Durée au format `1j`, `12h`, `30m`, combinable (`1j12h`) |
+| `/giveaway_end` | Termine immédiatement le giveaway en cours et tire les gagnants (réservé aux modérateurs) |
+
+Pour participer, n'importe quel membre tape `!giveway` dans le salon de giveaway (`GIVEAWAY_CHANNEL_ID` dans `cogs/giveaway.py`) : le message est supprimé et un DM confirme (ou refuse, en cas de double participation) l'inscription. Une seule entrée par membre et par giveaway (stockée en base). À l'expiration du délai, le(s) gagnant(s) sont tirés au sort automatiquement, annoncés dans le salon et prévenus en DM.
 
 ## Système économie & voitures
 
