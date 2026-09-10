@@ -136,7 +136,7 @@ class Giveaway(commands.Cog):
         winner_count = giveaway.get("winner_count", 1)
         winners = random.sample(participants, min(winner_count, len(participants))) if participants else []
 
-        await asyncio.to_thread(db.end_giveaway, giveaway["_id"], winners)
+        await asyncio.to_thread(db.delete_giveaway, giveaway["_id"])
 
         channel = self.bot.get_channel(giveaway["channel_id"])
         if channel is None:

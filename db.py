@@ -160,8 +160,6 @@ def create_giveaway(component: str, winner_count: int, channel_id: int, created_
             "created_by": created_by,
             "ends_at": ends_at,
             "participants": [],
-            "ended": False,
-            "winners": [],
         }
     )
     return result.inserted_id
@@ -173,14 +171,16 @@ def set_giveaway_message(giveaway_id, message_id: int) -> None:
 
 
 def get_active_giveaway(channel_id: int) -> dict:
-    """Renvoie le giveaway en cours pour ce salon, ou None s'il n'y en a pas"""
+    """Renvoie le giveaway en cours pour ce salon, ou None s'il n'y en a pas.
+    Un giveaway terminé est supprimé de la base (voir delete_giveaway) : tout
+    document présent pour ce salon est donc forcément en cours."""
     collection = get_giveaways()
-    return collection.find_one({"channel_id": channel_id, "ended": False})
+    return collection.find_one({"channel_id": channel_id})
 
 
 def get_expired_giveaways(now) -> list:
     collection = get_giveaways()
-    return list(collection.find({"ended": False, "ends_at": {"$lte": now}}))
+    return list(collection.find({"ends_at": {"$lte": now}}))
 
 
 def add_giveaway_participant(giveaway_id, user_id: int) -> bool:
@@ -194,6 +194,8 @@ def add_giveaway_participant(giveaway_id, user_id: int) -> bool:
     return result.modified_count > 0
 
 
-def end_giveaway(giveaway_id, winners: list) -> None:
+def delete_giveaway(giveaway_id) -> None:
+    """Supprime le giveaway de la base une fois terminé (gagnants déjà tirés et
+    annoncés) : aucun historique n'est conservé, à la demande explicite."""
     collection = get_giveaways()
-    collection.update_one({"_id": giveaway_id}, {"$set": {"ended": True, "winners": winners}})
+    collection.delete_one({"_id": giveaway_id})
