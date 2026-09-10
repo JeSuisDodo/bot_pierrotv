@@ -68,6 +68,11 @@ class Giveaway(commands.Cog):
             ),
             color=discord.Color.gold(),
         )
+        embed.add_field(
+            name="⚠️ Attention",
+            value=f"Ce salon est réservé aux participations : tout message différent de `{ENTRY_KEYWORD}` sera automatiquement supprimé.",
+            inline=False,
+        )
         embed.set_footer(text=f"{winner_count} gagnant(s)")
         return embed
 
@@ -166,13 +171,18 @@ class Giveaway(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.channel.id != GIVEAWAY_CHANNEL_ID:
             return
-        if message.content.strip().lower() != ENTRY_KEYWORD:
-            return
+
+        is_entry = message.content.strip().lower() == ENTRY_KEYWORD
 
         try:
             await message.delete()
         except (discord.Forbidden, discord.NotFound):
             pass
+
+        if not is_entry:
+            # Salon réservé aux participations : tout le reste est supprimé (voir
+            # l'avertissement dans l'annonce), sans DM ni traitement supplémentaire.
+            return
 
         giveaway = await asyncio.to_thread(db.get_active_giveaway, GIVEAWAY_CHANNEL_ID)
         if giveaway is None:
