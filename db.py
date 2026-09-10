@@ -148,12 +148,12 @@ def get_giveaways():
     return db["giveaways"]
 
 
-def create_giveaway(prize: str, winner_count: int, channel_id: int, created_by: int, ends_at) -> str:
+def create_giveaway(component: str, winner_count: int, channel_id: int, created_by: int, ends_at) -> str:
     """Crée un giveaway et renvoie son _id (ObjectId)"""
     collection = get_giveaways()
     result = collection.insert_one(
         {
-            "prize": prize,
+            "component": component,
             "winner_count": winner_count,
             "channel_id": channel_id,
             "message_id": None,

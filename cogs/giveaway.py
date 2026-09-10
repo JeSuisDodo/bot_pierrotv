@@ -58,11 +58,11 @@ class Giveaway(commands.Cog):
         self.check_giveaways.cancel()
 
     @staticmethod
-    def _build_announcement_embed(prize: str, winner_count: int, ends_at: datetime) -> discord.Embed:
+    def _build_announcement_embed(component: str, winner_count: int, ends_at: datetime) -> discord.Embed:
         embed = discord.Embed(
             title="🎉 Giveaway !",
             description=(
-                f"**À gagner : {prize}**\n\n"
+                f"**À gagner : {component}**\n\n"
                 f"Tape `{ENTRY_KEYWORD}` dans ce salon pour participer !\n"
                 f"Fin <t:{int(ends_at.timestamp())}:R>"
             ),
@@ -78,12 +78,12 @@ class Giveaway(commands.Cog):
 
     @app_commands.command(name="giveaway", description="[Modo] Lance un giveaway dans le salon dédié")
     @app_commands.describe(
-        prix="Ce que le gagnant remporte",
+        composant="Le composant à gagner (ex: RTX 4070, 16 Go RAM Corsair...)",
         duree="Durée du giveaway (ex: 1j, 12h, 30m, combinable comme 1j12h)",
         gagnants="Nombre de gagnants (1 par défaut)",
     )
     @is_mod()
-    async def giveaway(self, interaction: discord.Interaction, prix: str, duree: str, gagnants: int = 1):
+    async def giveaway(self, interaction: discord.Interaction, composant: str, duree: str, gagnants: int = 1):
         if gagnants < 1:
             await interaction.response.send_message("Le nombre de gagnants doit être d'au moins 1.", ephemeral=True)
             return
@@ -112,10 +112,10 @@ class Giveaway(commands.Cog):
 
         ends_at = datetime.now(timezone.utc) + delta
         giveaway_id = await asyncio.to_thread(
-            db.create_giveaway, prix, gagnants, GIVEAWAY_CHANNEL_ID, interaction.user.id, ends_at
+            db.create_giveaway, composant, gagnants, GIVEAWAY_CHANNEL_ID, interaction.user.id, ends_at
         )
 
-        message = await channel.send(embed=self._build_announcement_embed(prix, gagnants, ends_at))
+        message = await channel.send(embed=self._build_announcement_embed(composant, gagnants, ends_at))
         await asyncio.to_thread(db.set_giveaway_message, giveaway_id, message.id)
 
         await interaction.response.send_message(f"Giveaway lancé dans {channel.mention} !", ephemeral=True)
@@ -143,16 +143,16 @@ class Giveaway(commands.Cog):
             return
 
         if not winners:
-            await channel.send(f"🎉 Le giveaway pour **{giveaway['prize']}** est terminé, mais personne n'a participé.")
+            await channel.send(f"🎉 Le giveaway pour **{giveaway['component']}** est terminé, mais personne n'a participé.")
             return
 
         mentions = ", ".join(f"<@{uid}>" for uid in winners)
-        await channel.send(f"🎉 Le giveaway pour **{giveaway['prize']}** est terminé ! Félicitations {mentions} !")
+        await channel.send(f"🎉 Le giveaway pour **{giveaway['component']}** est terminé ! Félicitations {mentions} !")
 
         for uid in winners:
             try:
                 user = self.bot.get_user(uid) or await self.bot.fetch_user(uid)
-                await user.send(f"🎉 Félicitations, tu as gagné **{giveaway['prize']}** !")
+                await user.send(f"🎉 Félicitations, tu as gagné **{giveaway['component']}** !")
             except discord.HTTPException:
                 pass
 
@@ -195,9 +195,9 @@ class Giveaway(commands.Cog):
         added = await asyncio.to_thread(db.add_giveaway_participant, giveaway["_id"], message.author.id)
         try:
             if added:
-                await message.author.send(f"✅ Tu participes maintenant au giveaway pour **{giveaway['prize']}** !")
+                await message.author.send(f"✅ Tu participes maintenant au giveaway pour **{giveaway['component']}** !")
             else:
-                await message.author.send(f"Tu participes déjà au giveaway pour **{giveaway['prize']}**.")
+                await message.author.send(f"Tu participes déjà au giveaway pour **{giveaway['component']}**.")
         except discord.HTTPException:
             pass
 

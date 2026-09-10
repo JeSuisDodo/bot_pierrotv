@@ -134,7 +134,7 @@ Réservées à `manage_guild` ou au rôle défini par `MOD_ROLE_ID` dans `cogs/a
 ### 🎉 Giveaways (modérateur pour le lancement, `cogs/giveaway.py`)
 | Commande | Description |
 |---|---|
-| `/giveaway <prix> <durée> [gagnants]` | Lance un giveaway dans le salon dédié (réservé aux modérateurs). Durée au format `1j`, `12h`, `30m`, combinable (`1j12h`) |
+| `/giveaway <composant> <durée> [gagnants]` | Lance un giveaway dans le salon dédié (réservé aux modérateurs). Durée au format `1j`, `12h`, `30m`, combinable (`1j12h`) |
 | `/giveaway_end` | Termine immédiatement le giveaway en cours et tire les gagnants (réservé aux modérateurs) |
 
 Pour participer, n'importe quel membre tape `!giveway` dans le salon de giveaway (`GIVEAWAY_CHANNEL_ID` dans `cogs/giveaway.py`) : le message est supprimé et un DM confirme (ou refuse, en cas de double participation) l'inscription. Une seule entrée par membre et par giveaway (stockée en base). À l'expiration du délai, le(s) gagnant(s) sont tirés au sort automatiquement, annoncés dans le salon et prévenus en DM.
