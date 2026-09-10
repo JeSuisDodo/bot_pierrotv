@@ -84,13 +84,21 @@ class Giveaway(commands.Cog):
     )
     @is_mod()
     async def giveaway(self, interaction: discord.Interaction, composant: str, duree: str, gagnants: int = 1):
+        # defer immédiat : les appels base de données / Discord qui suivent peuvent
+        # dépasser les 3 secondes que Discord laisse pour la réponse initiale, ce qui
+        # affichait "L'application ne répond plus" même quand la commande aboutissait.
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except (discord.HTTPException, ConnectionError, OSError):
+            return
+
         if gagnants < 1:
-            await interaction.response.send_message("Le nombre de gagnants doit être d'au moins 1.", ephemeral=True)
+            await interaction.followup.send("Le nombre de gagnants doit être d'au moins 1.", ephemeral=True)
             return
 
         delta = parse_duration(duree)
         if delta is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Durée invalide. Utilise un format comme `1j`, `12h`, `30m` "
                 "(jours/heures/minutes/secondes, combinables : `1j12h`).",
                 ephemeral=True,
@@ -99,12 +107,12 @@ class Giveaway(commands.Cog):
 
         channel = self.bot.get_channel(GIVEAWAY_CHANNEL_ID)
         if channel is None:
-            await interaction.response.send_message("Salon de giveaway introuvable.", ephemeral=True)
+            await interaction.followup.send("Salon de giveaway introuvable.", ephemeral=True)
             return
 
         existing = await asyncio.to_thread(db.get_active_giveaway, GIVEAWAY_CHANNEL_ID)
         if existing:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Un giveaway est déjà en cours dans ce salon. Termine-le avec `/giveaway_end` avant d'en lancer un nouveau.",
                 ephemeral=True,
             )
@@ -118,17 +126,22 @@ class Giveaway(commands.Cog):
         message = await channel.send(embed=self._build_announcement_embed(composant, gagnants, ends_at))
         await asyncio.to_thread(db.set_giveaway_message, giveaway_id, message.id)
 
-        await interaction.response.send_message(f"Giveaway lancé dans {channel.mention} !", ephemeral=True)
+        await interaction.followup.send(f"Giveaway lancé dans {channel.mention} !", ephemeral=True)
 
     @app_commands.command(name="giveaway_end", description="[Modo] Termine immédiatement le giveaway en cours")
     @is_mod()
     async def giveaway_end(self, interaction: discord.Interaction):
-        giveaway = await asyncio.to_thread(db.get_active_giveaway, GIVEAWAY_CHANNEL_ID)
-        if giveaway is None:
-            await interaction.response.send_message("Aucun giveaway en cours.", ephemeral=True)
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except (discord.HTTPException, ConnectionError, OSError):
             return
 
-        await interaction.response.send_message("Giveaway terminé.", ephemeral=True)
+        giveaway = await asyncio.to_thread(db.get_active_giveaway, GIVEAWAY_CHANNEL_ID)
+        if giveaway is None:
+            await interaction.followup.send("Aucun giveaway en cours.", ephemeral=True)
+            return
+
+        await interaction.followup.send("Giveaway terminé.", ephemeral=True)
         await self._draw_winners(giveaway)
 
     async def _draw_winners(self, giveaway: dict) -> None:

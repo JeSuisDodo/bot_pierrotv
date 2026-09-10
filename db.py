@@ -5,12 +5,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Client réutilisé entre les appels (pymongo gère lui-même un pool de connexions
+# en interne). En recréer un nouveau à chaque appel de get_db() rouvrait une
+# connexion TLS complète à Atlas à chaque requête, ajoutant potentiellement
+# plusieurs secondes de latence à chaque commande qui touche la base — assez
+# pour dépasser les 3 secondes que Discord laisse pour répondre à une interaction.
+_client = None
+
 
 def get_db():
     """Connexion à la base MongoDB Atlas"""
-    CONNECTION_STRING = os.getenv("DBSTRING")
-    client = pymongo.MongoClient(CONNECTION_STRING)
-    return client["discord"]
+    global _client
+    if _client is None:
+        _client = pymongo.MongoClient(os.getenv("DBSTRING"))
+    return _client["discord"]
 
 
 # ---------- MEMBRES ----------
